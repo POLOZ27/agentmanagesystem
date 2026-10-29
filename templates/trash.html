@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block body %}<h1>回收站</h1>
+<p class="mute small">删掉的代理、被替换的旧合同和在线修改前的版本都先放在这里，{{ days }} 天后自动彻底删除。期间可以随时恢复。</p>
+{% if rows %}<div class="card"><table><tr><th>内容</th><th>原因</th><th>删除时间</th><th>剩余</th><th></th></tr>
+{% for t in rows %}<tr><td>{{ '👤 代理' if t.type == 'agent' else '📄 合同' }} · {{ t.label }}</td><td class="small">{{ t.why }}</td><td class="small mono">{{ t.when }}</td><td class="small">{{ t.left }} 天</td>
+<td style="white-space:nowrap"><form method="post" action="{{ url_for('trash_restore', tid=t.id) }}" style="display:inline"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn small ghost">恢复</button></form>
+<form method="post" action="{{ url_for('trash_purge', tid=t.id) }}" style="display:inline" onsubmit="return confirm('彻底删除后不能恢复，确定吗？')"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn small ghost">彻底删除</button></form></td></tr>{% endfor %}
+</table></div>{% else %}<div class="card mute">回收站是空的。</div>{% endif %}{% endblock %}

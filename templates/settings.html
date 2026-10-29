@@ -1,0 +1,79 @@
+{% extends "base.html" %}{% block body %}<h1>设置与安全</h1><div class="row">
+<div class="card"><h2>学校邮箱 · Microsoft 365 {% if cfg.m365_refresh %}<span class="tag t-活跃">已连接 {{ cfg.m365_user }}</span>{% else %}<span class="tag">未连接（演示模式）</span>{% endif %}</h2>
+<p class="small mute">用微软账号授权发信和收信，不保存邮箱密码。只收代理和潜在代理发来的邮件，不会改动你邮箱里其他邮件的已读状态。第一次需要在微软后台注册一个应用，拿到「应用程序 ID」，步骤见 Claude 发给你的说明。</p>
+<form method="post"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="m365_form" value="1">
+<div class="grid"><div><label>租户（学校域名）</label><input name="m365_tenant" value="{{ cfg.m365_tenant or 'cseec.ca' }}"></div>
+<div><label>应用程序（客户端）ID</label><input name="m365_client_id" value="{{ cfg.m365_client_id or '' }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
+<div><label>每周一汇总提醒发到</label><input name="digest_to" value="{{ cfg.digest_to or cfg.m365_user or '' }}" placeholder="polozhang@cseec.ca"></div>
+<div><label style="display:flex;gap:6px;align-items:center;margin-top:26px"><input type="checkbox" name="digest_on" value="1" style="width:auto" {{ 'checked' if cfg.get('digest_on', '1') == '1' }}> 每周一早上 8 点发汇总提醒</label></div></div>
+<p><button class="btn ghost">保存</button></p></form>
+{% if cfg.m365_client_id %}<p id="m365box"><button class="btn" type="button" id="m365go">{{ '重新连接' if cfg.m365_refresh else '连接 Microsoft 账号' }}</button>
+{% if cfg.m365_refresh %} <form method="post" action="{{ url_for('m365_disconnect') }}" style="display:inline"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn ghost">断开</button></form>
+ <form method="post" action="{{ url_for('m365_test') }}" style="display:inline"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn ghost">给自己发一封测试邮件</button></form>{% endif %}</p>
+<div id="m365msg" class="small"></div>
+<script>
+document.getElementById('m365go').onclick = async () => {
+  const msg = document.getElementById('m365msg'), fd = new FormData(); fd.append('_csrf', '{{ csrf }}');
+  msg.textContent = '正在向微软申请登录码…';
+  const r = await (await fetch('{{ url_for("m365_start") }}', {method: 'POST', body: fd})).json();
+  if (r.error) { msg.textContent = r.error; return; }
+  msg.innerHTML = '请在电脑或手机上打开 <a href="' + r.verification_uri + '" target="_blank" rel="noopener">' + r.verification_uri + '</a>，输入代码 <b style="font-size:18px">' + r.user_code + '</b>，用 polozhang@cseec.ca 登录并同意。这个页面会自动等你完成…';
+  const poll = async () => {
+    const p = new FormData(); p.append('_csrf', '{{ csrf }}'); p.append('device_code', r.device_code);
+    const s = await (await fetch('{{ url_for("m365_poll_route") }}', {method: 'POST', body: p})).json();
+    if (s.state === 'ok') { msg.textContent = '已连接，正在刷新…'; location.reload(); }
+    else if (s.state === 'pending') setTimeout(poll, (r.interval || 5) * 1000);
+    else msg.textContent = '没有连上：' + s.state;
+  };
+  setTimeout(poll, (r.interval || 5) * 1000);
+};
+</script>{% endif %}</div>
+<details class="card"><summary><b>其他邮箱（SMTP / IMAP，用户名密码方式）</b></summary>
+<form method="post"><input type="hidden" name="_csrf" value="{{ csrf }}"><p class="small mute">不是 Microsoft 365 的邮箱用这里。微软邮箱已经不支持密码方式，请用上面的授权。</p>
+<div class="grid"><div><label>SMTP 服务器</label><input name="smtp_host" value="{{ cfg.smtp_host or '' }}"></div><div><label>端口</label><input name="smtp_port" value="{{ cfg.smtp_port or '587' }}"></div>
+<div><label>账号</label><input name="smtp_user" value="{{ cfg.smtp_user or '' }}"></div><div><label>密码 / 应用密码{% if cfg.smtp_password %}（已保存）{% endif %}</label><input type="password" name="smtp_password"></div>
+<div><label>发件人显示</label><input name="from_addr" value="{{ cfg.from_addr or '' }}" placeholder="Johnathan Academy &lt;agents@...&gt;"></div>
+<div><label>IMAP 服务器</label><input name="imap_host" value="{{ cfg.imap_host or '' }}"></div><div><label>IMAP 账号（留空同上）</label><input name="imap_user" value="{{ cfg.imap_user or '' }}"></div>
+<div><label>IMAP 密码（留空同上）</label><input type="password" name="imap_password"></div></div><p><button class="btn">保存</button></p></form></details>
+<form method="post" class="card"><input type="hidden" name="_csrf" value="{{ csrf }}"><h2>结算与 AI</h2>
+<label>会计邮箱（代理确认后，一键把付款信息发给会计）</label><input name="accountant_email" type="email" value="{{ cfg.accountant_email or '' }}">
+<label>AI 模式（开发新代理的搜索和翻译）</label><select name="ai_mode">
+<option value="local" {{ 'selected' if (cfg.ai_mode or 'local') == 'local' }}>本地：学校服务器上的模型 + SearXNG 搜索（推荐，不出服务器）</option>
+<option value="hybrid" {{ 'selected' if cfg.ai_mode == 'hybrid' }}>本地 + GPT 补充：本地模型先搜索初筛，GPT 复核、翻译，本地模型忙时 GPT 顶上</option>
+<option value="claude" {{ 'selected' if cfg.ai_mode == 'claude' }}>Claude API（效果更好，需要 API Key）</option></select>
+<div class="grid"><div><label>本地模型地址（llama-server，OpenAI 兼容）</label><input name="local_llm_url" value="{{ cfg.local_llm_url or 'http://127.0.0.1:8080/v1' }}"></div>
+<div><label>模型名（可留空）</label><input name="local_model" value="{{ cfg.local_model or '' }}"></div>
+<div><label>本地模型 API Key{% if cfg.local_api_key %}（已设置，留空不变）{% endif %}</label><input type="password" name="local_api_key"></div>
+<div><label>SearXNG 搜索地址</label><input name="searxng_url" value="{{ cfg.searxng_url or 'http://127.0.0.1:8888' }}"></div></div>
+<div class="grid"><div><label>OpenAI API Key（本地 + GPT 模式用）{% if cfg.openai_key %}（已保存，留空不变）{% endif %}</label><input type="password" name="openai_key" placeholder="sk-…"></div>
+<div><label>GPT 模型名</label><input name="openai_model" value="{{ cfg.openai_model or '' }}" placeholder="填 OpenAI 后台里可用的模型名"></div></div>
+<label>Claude API Key{% if cfg.anthropic_key %}（已保存，留空不变）{% endif %}</label><input type="password" name="anthropic_key" placeholder="sk-ant-…">
+<p><button class="btn ghost" formaction="{{ url_for('settings_ai_test') }}">测试 AI 连接</button> <span class="small mute">（测试用页面上填的地址，测好再点保存）</span></p>
+<p class="small mute">所有模式都只发送搜索条件、公开的机构网页内容和邮件模板，不发送代理、学生、佣金数据。本地模式全部在学校服务器上完成；本地 + GPT 模式下，GPT 只看到公开的机构网页和邮件模板。</p>
+<p><button class="btn">保存</button></p></form>
+<form method="post" class="card" action="{{ url_for('settings_import') }}" enctype="multipart/form-data"><input type="hidden" name="_csrf" value="{{ csrf }}"><h2>导入现有资料</h2>
+<p class="small mute">第一次使用时导入一次：佣金总表 Excel 生成代理名单和历史佣金；已签合同可以一次全选上传，按文件名里的代理编号（如 J202103）和 “until 2027 Aug” 自动归到对应代理，加密保存。</p>
+<label>佣金总表（.xlsx）</label><input type="file" name="workbook" accept=".xlsx" required>
+<label>已签合同：进「已签代理」文件夹按 Ctrl+A 全选（不是合同的文件会自动跳过）</label><input type="file" name="contracts" accept=".pdf,.doc,.docx" multiple>
+<label>潜在代理名单 Agent Tracker（.xlsx，可选）</label><input type="file" name="tracker" accept=".xlsx">
+<p class="small"><label style="display:inline"><input type="checkbox" name="confirm" value="1"> 我确认要再次导入（系统里已有代理时才需要）</label></p>
+<p><button class="btn" onclick="this.textContent='正在上传和加密，请稍等…'">导入</button></p></form>
+<form method="post" class="card"><input type="hidden" name="_csrf" value="{{ csrf }}"><h2>资料链接与 T4A</h2>
+<label>合作伙伴资料包链接（Start Letter、续签信里的「学校介绍」链接；留空则用资料库里的「资料包」）</label><input name="kit_link" value="{{ cfg.kit_link or '' }}" placeholder="https://johnathanacademy-my.sharepoint.com/…">
+<div class="grid"><div><label>付款方名称（T4A 表头）</label><input name="payer_name" value="{{ cfg.payer_name or 'Johnathan Academy' }}"></div><div><label>学校 BN / 付款方账号（T4A 表头）</label><input name="payer_bn" value="{{ cfg.payer_bn or '' }}" placeholder="123456789RZ0001"></div></div>
+<p><button class="btn">保存</button></p></form>
+<form method="post" action="{{ url_for('settings_backup') }}" class="card"><input type="hidden" name="_csrf" value="{{ csrf }}"><h2>加密备份（NAS）</h2>
+<p class="small mute">每天凌晨 2 点后自动把保险库复制到 NAS：备份里全是密文，NAS 管理员和技术人员都打不开；恢复时仍然要主密码 + 验证码（或恢复密钥）。保留最近 14 天每天一份，更早的每月一份，共 12 个月。</p>
+<table><tr><td class="mute">备份目录</td><td class="mono small">{{ bk_dir or '未设置（启动时用环境变量 AGENT_PORTAL_BACKUP_DIR 指定 NAS 目录）' }}</td></tr>
+<tr><td class="mute">最近一次成功</td><td class="small">{{ bk.last_ok|replace('T', ' ') if bk.last_ok else '还没有' }}{% if bk.last_file %} · {{ bk.last_file }} · {{ '%.1f'|format(bk.last_size / 1048576) }} MB{% endif %}</td></tr>
+{% if bk.last_error %}<tr><td class="mute">最近错误</td><td class="small" style="color:var(--bad)">{{ bk.last_error }}</td></tr>{% endif %}
+{% for n, size in bk_files %}<tr><td class="mute">{{ '已有备份' if loop.first }}</td><td class="small mono">{{ n }} · {{ '%.1f'|format(size / 1048576) }} MB</td></tr>{% endfor %}</table>
+<p><button class="btn ghost" {{ '' if bk_dir else 'disabled' }}>立即备份</button>
+<button class="btn ghost" formaction="{{ url_for('settings_backup_verify') }}" {{ '' if bk_dir else 'disabled' }}>恢复演练（核对最新备份）</button></p></form>
+<form method="post" class="card"><input type="hidden" name="_csrf" value="{{ csrf }}"><h2>更换主密码</h2><label>原密码</label><input type="password" name="old_password"><label>新密码（至少 12 位）</label><input type="password" name="new_password"><p><button class="btn">更换</button></p>
+<p class="small mute">更换密码不会重新加密数据，只会重新包裹数据密钥，几秒完成。</p></form></div>
+<div class="card"><h2>回收站</h2><p class="small mute">删掉的代理和被替换的旧合同先保留 30 天，可以恢复。</p><p><a class="btn ghost" href="{{ url_for('trash_list') }}">打开回收站</a></p></div>
+<form method="post" action="{{ url_for('trusted_clear') }}" class="card"><input type="hidden" name="_csrf" value="{{ csrf }}"><h2>记住的设备</h2><p class="small mute">记住的设备 30 天内登录只要主密码，不用验证码。现在有 {{ trusted_n }} 台{% if this_trusted %}（包括这台）{% endif %}。电脑丢了或换人用时，点下面取消；更换主密码也会全部取消。</p><p><button class="btn ghost">取消所有记住的设备</button></p></form>
+<div class="card"><h2>代理自助查询页 <span class="tag {{ 't-活跃' if portal_on else '' }}">{{ '已开放' if portal_on else '已做好，未上线' }}</span></h2>
+<p class="small mute" style="margin:0">代理用登记的邮箱 + 邮件验证码登录 /p/，只能看到自己的学生申请进度、结算单（可确认并上传发票）、合同到期日和宣传资料。上线前：配置真实邮箱（验证码要真正发出去）、HTTPS 域名，并在启动时加环境变量 AGENT_SELF_SERVICE=1。现在可以在任意代理页面点「代理视角」预览。</p></div>
+<div class="card"><h2>访问记录</h2><p class="small mute">只记录事件和时间，不含任何代理数据。</p><table>{% for t, e in log %}<tr><td class="small mono">{{ t }}</td><td class="small">{{ e }}</td></tr>{% endfor %}</table></div>{% endblock %}

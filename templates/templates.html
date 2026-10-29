@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block body %}<h1>邮件模板</h1>
+<div class="row"><div class="card" style="padding:0;flex:1"><table><tr><th>模板</th><th>用途</th><th>已有译文</th></tr>
+{% for x in tpls %}<tr><td><a href="{{ url_for('mail_templates', tid=x.id) }}">{{ x.name }}</a></td><td class="small">{{ {'outreach':'开发邮件','followup':'跟进邮件','agent':'给代理'}.get(x.kind, x.kind) }}</td>
+<td class="small">{{ (x.translations or {})|length }} 种</td></tr>{% endfor %}</table>
+<p style="padding:0 16px" class="small mute"><code>{name}</code> 换成联系人，<code>{agency}</code> 换成机构名。译文在发邮件页面右上角编辑，勾选「存回这个模板」即保存。</p></div>
+<form method="post" action="{{ url_for('mail_templates', tid=t.id) if t else url_for('mail_templates') }}" class="card" style="flex:2"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<h2>{{ '编辑：' ~ t.name if t else '新建模板' }}</h2><div class="grid"><div><label>名称</label><input name="name" value="{{ t.name if t else '' }}" required></div>
+<div><label>用途</label><select name="kind">{% for k, v in [('outreach','开发邮件'),('followup','跟进邮件'),('agent','给代理')] %}<option value="{{ k }}" {{ 'selected' if t and t.kind == k }}>{{ v }}</option>{% endfor %}</select></div></div>
+<label>主题</label><input name="subject" value="{{ t.subject if t else '' }}" required><label>正文（英文）</label><textarea name="body" style="min-height:360px" required>{{ t.body if t else '' }}</textarea>
+{% if t and t.translations %}<p class="small mute">已有译文：{% for l in t.translations %}{{ labels.get(l, l) }}{{ '、' if not loop.last }}{% endfor %}。改了英文后，记得在发邮件页面重新翻译。</p>{% endif %}
+<p><button class="btn">保存</button> {% if t %}<button class="btn danger" name="delete" value="1" onclick="return confirm('删除这个模板？')">删除</button> <a class="btn ghost" href="{{ url_for('mail_templates') }}">新建模板</a>{% endif %}</p></form></div>{% endblock %}

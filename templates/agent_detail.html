@@ -1,0 +1,57 @@
+{% extends "base.html" %}{% block body %}
+<div class="toolbar" style="flex-wrap:wrap"><h1 style="margin:0">{{ a.name }}</h1><span class="mono mute">{{ a.code }}</span><span class="tag t-{{ a.status }}">{{ a.status }}</span><span style="flex:1"></span>
+<a class="btn ghost" href="{{ url_for('compose', agent=a.id) }}">写邮件</a><a class="btn ghost" href="{{ url_for('student_edit', agent=a.id) }}">+ 学生申请</a><a class="btn ghost" href="{{ url_for('commission_edit', agent=a.id) }}">+ 结算单</a><a class="btn ghost" href="{{ url_for('portal_preview', aid=a.id) }}" title="代理登录自助页后看到的内容">代理视角</a><a class="btn" href="{{ url_for('agent_edit', aid=a.id) }}">编辑</a></div>
+
+{% set pipeline = a.status in ["潜在", "洽谈中", "已签约"] or (a.onboarding and step < 7) %}
+{% if pipeline %}<div class="card"><h2>入驻流程 · 第 {{ [step + 1, 7]|min }} / 7 步</h2>
+<ol class="flow">{% for key, label, desc in ONBOARDING %}<li class="{{ 'done' if key in (a.onboarding or {}) else ('cur' if loop.index0 == step else '') }}"><b>{{ label }}</b>{{ (a.onboarding or {}).get(key) or '' }}</li>{% endfor %}</ol>
+{% for key, label, desc in ONBOARDING %}{% set i = loop.index0 %}{% set done = (a.onboarding or {}).get(key) %}
+<div class="stepbox {{ 'done' if done else ('cur' if i == step else '') }}"><span class="num">{{ '✓' if done else i + 1 }}</span><div class="body">
+<b>{{ label }}</b> <span class="small mute">{{ desc }}</span>{% if done %} <span class="small mute">· {{ done }}</span>{% endif %}
+{% if key == 'contract' and not done %}
+<form method="post" action="{{ url_for('contract_generate', aid=a.id) }}" class="inline"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div><label>等级</label><select name="level">{% for k, v in LEVELS.items() %}<option value="{{ k }}" {{ 'selected' if (a.level or 'standard')==k }}>{{ v.label }}</option>{% endfor %}</select></div>
+<div><label>合同开始</label><input type="date" name="start" value="{{ start }}"></div><div><label>合同结束</label><input type="date" name="end" value="{{ end }}"></div>
+<div style="flex:2"><label class="steps" style="margin:0"><input type="checkbox" name="send" value="1" {{ 'checked' if a.email else 'disabled' }}> 生成后连同 Start Letter 发给 {{ a.email or '（还没有邮箱）' }}</label></div>
+<div><button class="btn">生成合同</button></div></form>
+<p class="small mute" style="margin:6px 0 0">合同按学校现有的 Service Contract 自动填好：代理名称、地址、联系人、编号、合同期、等级比例、付款方式。{% if not a.address or not a.legal_name %}<a href="{{ url_for('agent_edit', aid=a.id) }}">补全公司法定名称 / 地址</a>后生成效果更好。{% endif %}</p>
+{% elif key == 'signed' and not done %}
+<form method="post" enctype="multipart/form-data" action="{{ url_for('contract_upload', aid=a.id) }}" class="inline"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div style="flex:2"><label>签回的合同（PDF / 扫描件，加密保存）</label><input type="file" name="file" required></div>
+<div><label>合同到期日</label><input type="date" name="expiry" value="{{ (a.contracts or [{}])[-1].expiry or end }}"></div><div><button class="btn">上传</button></div></form>
+{% elif key == 'activate' and not done %}
+<form method="post" action="{{ url_for('agent_activate', aid=a.id) }}" class="inline"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div style="flex:3"><label class="steps" style="margin:0"><input type="checkbox" name="send" value="1" {{ 'checked' if a.email else 'disabled' }}> 发欢迎信（含代理编号 {{ a.code or '自动生成' }}）</label></div><div><button class="btn">开通代理</button></div></form>
+{% elif not done %}
+<form method="post" action="{{ url_for('agent_onboarding', aid=a.id) }}"><input type="hidden" name="_csrf" value="{{ csrf }}">
+{% for k, _, _ in ONBOARDING %}{% if k in (a.onboarding or {}) or k == key %}<input type="hidden" name="{{ k }}" value="1">{% endif %}{% endfor %}
+<button class="btn {{ '' if i == step else 'ghost' }}">标记完成</button></form>{% endif %}
+</div></div>{% endfor %}</div>{% endif %}
+
+<div class="row"><div class="card"><h2>资料</h2><table>
+<tr><td class="mute">联系人</td><td>{{ a.contact or '—' }}</td></tr><tr><td class="mute">邮箱</td><td>{{ a.email or '—' }}</td></tr>
+<tr><td class="mute">电话</td><td>{{ a.phone or '—' }}</td></tr><tr><td class="mute">地区</td><td>{{ a.country or '' }} {{ a.city or '' }}</td></tr>
+{% if a.address or a.website %}<tr><td class="mute">地址 / 网站</td><td class="small">{{ a.address or '' }} {{ a.website or '' }}</td></tr>{% endif %}
+<tr><td class="mute">等级 / 佣金</td><td>{% if a.level %}{{ LEVELS[a.level].label }}{% else %}{{ scheme_label(a) }} <span class="small mute">旧合同</span>{% endif %}<div class="small mute">兼职 15% · AP 10%</div></td></tr>
+<tr><td class="mute">E-Transfer</td><td class="small">{{ a.etransfer or '—' }}</td></tr><tr><td class="mute">支票抬头</td><td class="small">{{ a.payee or '—' }}</td></tr>
+<tr><td class="mute">银行/备注</td><td class="small">{{ a.detail or '' }} {{ a.notes or '' }}</td></tr>
+<tr><td class="mute">累计佣金</td><td><b>{{ total|money or '$0' }}</b></td></tr></table></div>
+<div class="card"><h2>代理合同</h2><table>{% for c in a.contracts or [] %}{% set d = days_left(c.expiry) %}<tr>
+<td class="small">{% if c.fid %}<a href="{{ url_for('contract_download', aid=a.id, i=loop.index0) }}">📄 {{ c.name }}</a>{% if c.name.lower().endswith('.docx') %} <a class="small" href="{{ url_for('contract_edit', aid=a.id, i=loop.index0) }}">在线预览 / 编辑</a>{% endif %}{% else %}📄 {{ c.name }} <span class="tag">文件待上传</span>{% endif %}{% if c.kind %} <span class="tag">{{ c.kind }}</span>{% endif %}</td>
+<td class="small">{{ c.expiry or '' }}</td><td>{% if d is not none and c.kind not in ['待签（系统生成）', '续签待签'] %}<span class="tag {{ 't-bad' if d < 0 else ('t-warn' if d < 120 else 't-活跃') }}">{{ '已过期' if d < 0 else '有效' }}</span>{% endif %}</td></tr>
+{% else %}<tr><td class="mute">还没有合同</td></tr>{% endfor %}</table>
+{% if not pipeline %}{% set dl = days_left(a.contract_expiry) %}{% if dl is not none and dl <= 120 %}<p class="small" style="margin:12px 0 0"><span class="tag t-warn">合同{{ '已过期' if dl < 0 else '%d 天后到期'|format(dl) }}</span>{% if a.renewal and a.renewal.sent %} 续签合同已于 {{ a.renewal.sent }} 发出，等签回{% elif a.renewal %} 续签合同已准备好{% endif %} <a href="{{ url_for('renewals') }}">去续签 →</a></p>{% endif %}
+<form method="post" action="{{ url_for('contract_generate', aid=a.id) }}" class="inline" style="margin-top:12px"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div><label>新合同：等级</label><select name="level">{% for k, v in LEVELS.items() %}<option value="{{ k }}" {{ 'selected' if (a.level or 'standard')==k }}>{{ v.label }}</option>{% endfor %}</select></div>
+<div><label>开始</label><input type="date" name="start" value="{{ start }}"></div><div><label>结束</label><input type="date" name="end" value="{{ end }}"></div><div><button class="btn ghost">生成新合同</button></div></form>
+<form method="post" enctype="multipart/form-data" action="{{ url_for('contract_upload', aid=a.id) }}" class="inline" style="margin-top:8px"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div style="flex:2"><label>上传签好的合同（加密保存）</label><input type="file" name="file" required></div><div><label>到期日</label><input type="date" name="expiry"></div><div><button class="btn ghost">上传</button></div></form>{% endif %}</div></div>
+
+{% if students %}<div class="card" style="padding:0"><h2 style="padding:14px 16px 0">学生申请 <span class="small mute">{{ students|length }} 名</span></h2><table><tr><th>学生</th><th>项目</th><th>入学学期</th><th>进度</th></tr>
+{% for s in students %}<tr><td><a href="{{ url_for('student_edit', sid=s.id) }}">{{ s.name }}</a></td><td class="small">{{ PROGRAMS.get(s.program, s.program) }}</td><td class="small">{{ s.intake }}</td><td><span class="tag {{ 't-活跃' if s.stage=='已入学' else ('t-bad' if s.stage=='未入学' else 't-已发结算单') }}">{{ s.stage }}</span></td></tr>{% endfor %}</table></div>{% endif %}
+<div class="card" style="padding:0"><h2 style="padding:14px 16px 0">结算单</h2><table><tr><th>学期</th><th>学生</th><th class="r">已缴学费</th><th class="r">佣金</th><th>进度</th><th></th></tr>
+{% for c in comms %}<tr><td>{{ c.term }}</td><td class="small">{% if c.students %}{{ c.students|length }} 名{% else %}{{ [c.stu_term, c.stu_y1, c.stu_y2, c.stu_y3, c.stu_ft, c.stu_pt and ('兼职 ' ~ c.stu_pt), c.stu_ap and ('AP ' ~ c.stu_ap)]|select|join(' · ') }}{% endif %}</td>
+<td class="r">{{ c.fees|money }}</td><td class="r">{{ c.amount|money }}{% if c.mismatch %} <span class="tag t-warn" title="系统按规则计算为 {{ c.calc|money }}">需核对</span>{% endif %}</td>
+<td><span class="tag t-{{ c.stage }}">{{ c.stage }}</span></td><td><a class="small" href="{{ url_for('commission_edit', cid=c.id) }}">打开</a></td></tr>{% else %}<tr><td class="mute">暂无</td></tr>{% endfor %}</table></div>
+<div class="card"><h2>往来邮件</h2><table>{% for m in mails %}<tr><td>{{ '↙ 收' if m.direction=='in' else '↗ 发' }}</td><td><a href="{{ url_for('mail_msg', mid=m.id) }}">{{ m.subject }}</a>{% if m.attachments %} <span class="small mute">📎{{ m.attachments|length }}</span>{% endif %}</td><td class="small mute">{{ m.at[:16]|replace('T',' ') }}</td><td><span class="tag t-{{ m.status }}">{{ m.status }}</span></td></tr>{% else %}<tr><td class="mute">暂无</td></tr>{% endfor %}</table></div>
+{% endblock %}

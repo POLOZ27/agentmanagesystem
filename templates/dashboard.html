@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% block body %}<h1>总览</h1>{% if t4a_due %}<div class="flash" style="background:var(--warnbg);color:var(--warn)">{{ t4a_due.year }} 年有 {{ t4a_due.n }} 个加拿大代理需要开 T4A，截止 {{ t4a_due.deadline }}。<a href="{{ url_for('payments', year=t4a_due.year) }}">去处理 →</a></div>{% endif %}
+<div class="row">
+<div class="card kpi"><div class="l">活跃代理</div><div class="n">{{ active }}</div><div class="small mute">共 {{ agents|length }} 个代理</div></div>
+<div class="card kpi"><div class="l">本学期佣金（{{ cur }}）</div><div class="n">{{ cur_total|money or '$0' }}</div><div class="small mute">{{ cur_rows|length }} 个代理有学生</div></div>
+<div class="card kpi"><div class="l">未结清佣金</div><div class="n">{{ open_rows|map(attribute='amount')|sum|money or '$0' }}</div><div class="small mute">{{ open_rows|length }} 张结算单</div></div>
+<div class="card kpi"><div class="l">在办的学生申请</div><div class="n"><a href="{{ url_for('students') }}" style="color:inherit">{{ open_students }}</a></div><div class="small mute">本学期已入学 {{ enrolled_now }} 人</div></div>
+<div class="card kpi"><div class="l">开发中的潜在代理</div><div class="n">{{ prospects|rejectattr('stage','in',['已转为代理','不合适','待审核'])|list|length }}</div><div class="small mute">{{ followups|length }} 个该跟进了</div></div></div>
+
+<div class="card"><div class="toolbar"><h2 style="margin:0">佣金结算进度</h2><span style="flex:1"></span><a class="small" href="{{ url_for('commissions') }}">去结算 →</a></div>
+<ol class="flow">{% for s in STAGES[:-1] %}<li><b>{{ s }} · {{ stage_counts[s]|length }}</b>{{ stage_counts[s]|map(attribute='amount')|sum|money or '$0' }}</li>{% endfor %}<li class="done"><b>已付</b>完成</li></ol>
+<table>{% for r in open_rows[:8] %}<tr><td><a href="{{ url_for('commission_edit', cid=r.id) }}">{{ r.agent.name }}</a> <span class="small mute">{{ r.term }}</span></td><td><span class="tag t-{{ r.stage }}">{{ r.stage }}</span></td><td class="r">{{ r.amount|money }}</td></tr>{% else %}<tr><td class="mute">没有未结清的结算单</td></tr>{% endfor %}</table></div>
+
+<div class="row"><div class="card"><h2>新代理入驻（共 7 步）</h2><table>{% for a in pipeline %}{% set n = onboarding_step(a) %}<tr><td><a href="{{ url_for('agent_detail', aid=a.id) }}">{{ a.name }}</a> <span class="small mute">{{ a.country }}</span></td>
+<td class="small">{% if n < 7 %}第 {{ n + 1 }} 步：{{ ONBOARDING[n][1] }}{% else %}待开通{% endif %}</td><td class="small mute">{{ n }}/7</td></tr>{% else %}<tr><td class="mute">暂无</td></tr>{% endfor %}</table>
+<p><a class="btn ghost" href="{{ url_for('agent_new') }}">+ 新代理</a> <a class="btn ghost" href="{{ url_for('prospects') }}">开发新代理</a></p></div>
+<div class="card"><h2>该跟进的潜在代理</h2><table>{% for p in followups[:8] %}<tr><td><a href="{{ url_for('prospect_detail', pid=p.id) }}">{{ p.agency }}</a></td><td class="small">{{ COUNTRY_ZH.get(p.country, p.country) }}</td><td class="small mute">上次 {{ p.last_email_on }}</td></tr>{% else %}<tr><td class="mute">暂无</td></tr>{% endfor %}</table>
+{% if followups %}<p><a class="btn ghost" href="{{ url_for('outreach', kind='followup', ids=followups|map(attribute='id')|list) }}">一键发跟进邮件</a></p>{% endif %}</div></div>
+
+<div class="row"><div class="card"><h2>各学期佣金（最近 8 个）</h2>
+{% set mx = (by_term|map(attribute=1)|max if by_term else 1) or 1 %}
+{% for t, v in by_term %}<div class="bar"><span class="t" title="{{ t }}">{{ t }}</span><span class="b" style="width:{{ (v / mx * 60)|round }}%"></span><span class="small">{{ v|money }}</span></div>{% endfor %}</div>
+<div class="card"><div class="toolbar"><h2 style="margin:0">合同即将到期 / 已过期</h2><span style="flex:1"></span><a class="small" href="{{ url_for('renewals') }}">去续签 →</a></div><table>{% for a in expiring[:8] %}{% set d = days_left(a.contract_expiry) %}
+<tr><td><a href="{{ url_for('agent_detail', aid=a.id) }}">{{ a.name }}</a> <span class="mute small">{{ a.code }}</span></td><td>{{ a.contract_expiry }}</td>
+<td><span class="tag {{ 't-bad' if d < 0 else 't-warn' }}">{{ '已过期 %d 天'|format(-d) if d < 0 else '%d 天后'|format(d) }}</span>{% if a.renewal and a.renewal.sent %} <span class="tag t-已发结算单">续签已发</span>{% elif a.renewal %} <span class="tag">续签已准备</span>{% endif %}</td></tr>{% else %}<tr><td class="mute">暂无</td></tr>{% endfor %}</table></div></div>
+<div class="row"><div class="card"><h2>定时 News 推送</h2><table>{% for c in campaigns %}<tr><td>{{ c.subject }}</td><td class="small">{{ c.cadence }}</td><td class="small mute">下次 {{ c.next_at|replace('T',' ') }}</td></tr>{% else %}<tr><td class="mute">暂无</td></tr>{% endfor %}</table></div>
+<div class="card"><h2>最新来信</h2><table>{% for m in inbox %}<tr><td><a href="{{ url_for('mail_msg', mid=m.id) }}">{{ m.subject }}</a></td><td class="small mute">{{ agents[m.agent_id].name if m.agent_id in agents else m['from'] }}</td></tr>{% else %}<tr><td class="mute">暂无</td></tr>{% endfor %}</table></div></div>
+{% endblock %}

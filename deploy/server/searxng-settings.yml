@@ -1,0 +1,8 @@
+use_default_settings: true
+server:
+  secret_key: "dfc3db88e81e58d554de0596b1af68a303e753857c877dffe16ce17e897def38"
+  limiter: false
+  image_proxy: false
+search:
+  safe_search: 0
+  formats: [html, json]   # 代理系统通过 JSON 接口调用

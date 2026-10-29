@@ -1,0 +1,14 @@
+{
+	auto_https disable_redirects
+	skip_install_trust
+	default_sni DEFAULT_IP
+}
+SITES {
+	tls internal
+	reverse_proxy app:8800
+	header {
+		X-Frame-Options DENY
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+}

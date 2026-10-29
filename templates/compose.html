@@ -1,0 +1,23 @@
+{% extends "base.html" %}{% block body %}<h1>写邮件 / 新建 News 推送</h1>
+<form method="post" class="card"><input type="hidden" name="_csrf" value="{{ csrf }}"><div class="grid">
+<div><label>发给</label><select name="audience" id="aud"><option {{ 'selected' if not pre }}>活跃代理</option><option>全部代理</option><option {{ 'selected' if pre }}>选定代理</option></select></div>
+<div><label>频率</label><select name="cadence"><option>立即发送</option><option>仅一次（定时）</option><option>每周</option><option>每两周</option><option>每月</option><option>每季度</option></select></div>
+<div><label>首次发送时间（定时用）</label><input type="datetime-local" name="send_at"></div></div>
+<label>选定代理（「发给」选「选定代理」时生效，按住 Ctrl 多选）</label><select name="agent_ids" multiple size="6">{% for a in agents %}<option value="{{ a.id }}" {{ 'selected' if a.id==pre }}>{{ a.code or '' }} {{ a.name }} · {{ a.email }}</option>{% endfor %}</select>
+<label>主题</label><input name="subject" required value="Johnathan Academy 最新动态 | {代理名称}">
+<div class="toolbar" style="margin:10px 0 0"><label style="margin:0">正文（可用 {代理名称} {代理编号} {联系人} 自动替换）</label><span style="flex:1"></span>
+<select id="kit" style="width:auto"><option value="">插入宣传资料链接…</option>{% for x in kit %}<option value="{{ x.title }}: {{ x.url }}">{{ x.kind }} · {{ x.title }}</option>{% endfor %}</select></div><textarea name="body" id="body" required>Dear {联系人},
+
+感谢您一直以来对 Johnathan Academy 的支持。以下是本月学校动态：
+
+1. 招生：
+2. 新课程 / AP：
+3. 学生活动与成绩：
+4. 重要日期：
+
+如有学生咨询，欢迎随时联系我们。您的代理编号：{代理编号}
+
+Best regards,
+Johnathan Academy</textarea>
+<p><button class="btn">确定</button></p></form>
+<script>document.getElementById('kit').addEventListener('change',function(){if(!this.value)return;const b=document.getElementById('body');const i=b.selectionStart||b.value.length;b.value=b.value.slice(0,i)+this.value+'\n'+b.value.slice(i);this.value='';b.focus();});</script>{% endblock %}

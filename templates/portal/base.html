@@ -1,0 +1,5 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Portal · Johnathan Academy</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head><body>
+<div class="top"><b>Johnathan Academy · Agent Portal</b><span style="flex:1"></span>{% if a and not preview %}<a href="{{ url_for('portal_logout') }}" style="color:#cfe0f0">Sign out</a>{% endif %}</div>
+<main style="max-width:980px">{% if preview %}<div class="flash" style="background:var(--warnbg);color:var(--warn)">预览：这是 {{ a.name }} 登录自助页后看到的内容（自助页{{ '已开放' if portal_on else '尚未开放，代理现在还看不到' }}）。<a href="{{ url_for('agent_detail', aid=a.id) }}">返回后台</a></div>{% endif %}
+{% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}{% block body %}{% endblock %}</main></body></html>

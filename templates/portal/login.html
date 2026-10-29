@@ -1,0 +1,3 @@
+{% extends "portal/base.html" %}{% block body %}<div class="center card"><h1>Agent sign-in</h1>
+<p class="small mute">Enter the email address registered with Johnathan Academy. We will send you a 6-digit sign-in code.</p>
+<form method="post"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>Email</label><input type="email" name="email" required autofocus><p><button class="btn">Send code</button></p></form></div>{% endblock %}

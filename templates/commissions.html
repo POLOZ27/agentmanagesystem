@@ -1,0 +1,31 @@
+{% extends "base.html" %}{% block body %}<h1>佣金结算</h1>
+<form class="toolbar" style="flex-wrap:wrap"><label style="margin:0">学期</label><select name="term" onchange="this.form.submit()">{% for t in terms|reverse %}<option {{ 'selected' if t==term }}>{{ t }}</option>{% endfor %}</select>
+<a class="btn ghost small" href="#" onclick="document.getElementById('newterm').hidden=!document.getElementById('newterm').hidden;return false">+ 新建学期</a>
+{% if term and not rows %}<button class="btn ghost small" form="delterm" onclick="return confirm('删除空学期「{{ term }}」？')">删除这个空学期</button>{% endif %}
+<span style="flex:1"></span><a class="btn ghost" href="{{ url_for('commissions_export', term=term) }}">导出 Excel</a><a class="btn" href="{{ url_for('commission_edit', term=term) }}">+ 新结算单</a></form>
+<form method="post" action="{{ url_for('term_create') }}" id="newterm" class="card toolbar" style="flex-wrap:wrap" hidden><input type="hidden" name="_csrf" value="{{ csrf }}">
+<label style="margin:0">新学期名称</label><input name="name" list="termsug" required placeholder="例如 {{ suggest[0] if suggest else 'Sep-Dec Fall 26-27' }}" style="min-width:240px">
+<datalist id="termsug">{% for t in suggest %}<option>{{ t }}</option>{% endfor %}</datalist>
+{% for t in suggest[:4] %}<a href="#" class="tag" onclick="this.closest('form').elements['name'].value='{{ t }}';return false">{{ t }}</a>{% endfor %}
+<button class="btn small">新建</button><span class="small mute" style="flex-basis:100%">名称里带学年（如 26-27）或年份（如 2027 Summer School），报表才能按学年统计。</span></form>
+<form method="post" action="{{ url_for('term_delete') }}" id="delterm"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="name" value="{{ term }}"></form>
+<div class="card"><h2>结算流程</h2>
+<ol class="flow">
+<li><b>草稿 · 填学生明细</b>上传 Student Roster 或逐个填写，系统按合同自动算佣金</li>
+<li><b>发结算单</b>一键把对账单 Excel 和结算邮件发给代理，金额锁定</li>
+<li><b>代理确认</b>代理回信确认并附发票，从收件箱一键登记</li>
+<li><b>交会计</b>一键把对账单、发票和付款信息发给会计</li>
+<li><b>已付</b>登记付款日期和凭证，可自动通知代理</li></ol>
+{% set drafts = rows|selectattr('stage','equalto','草稿')|rejectattr('imported')|list %}
+<div class="toolbar" style="flex-wrap:wrap">{% for s in STAGES %}{% set g = rows|selectattr('stage','equalto',s)|list %}<span class="tag t-{{ s }}">{{ s }} {{ g|length }} · {{ g|map(attribute='amount')|sum|money or '$0' }}</span>{% endfor %}<span style="flex:1"></span>
+{% if drafts %}<form method="post" action="{{ url_for('commission_send_all') }}" onsubmit="return confirm('给 {{ drafts|length }} 个代理发出本学期结算单？')"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="term" value="{{ term }}"><button class="btn">一键发出 {{ drafts|length }} 张草稿结算单</button></form>{% endif %}</div></div>
+<div class="row"><div class="card kpi"><div class="l">本学期已缴学费</div><div class="n">{{ fees|money or '$0' }}</div></div><div class="card kpi"><div class="l">本学期佣金合计</div><div class="n">{{ total|money or '$0' }}</div></div>
+<div class="card kpi"><div class="l">未付</div><div class="n">{{ rows|rejectattr('stage','equalto','已付')|rejectattr('stage','equalto','历史导入')|map(attribute='amount')|sum|money or '$0' }}</div></div></div>
+<div class="card" style="padding:0"><table><tr><th>编号</th><th>代理</th><th>等级 / 方案</th><th>学生</th><th class="r">已缴学费</th><th class="r">佣金</th><th>进度</th><th>付款方式</th><th></th></tr>
+{% for r in rows %}<tr><td class="mono small">{{ r.agent.code }}</td><td><a href="{{ url_for('agent_detail', aid=r.agent_id) }}">{{ r.agent.name }}</a></td>
+<td class="small">{{ scheme_label(r.agent) }}{% if r.agent.level and r.ft1_ay %}<div class="mute">本学年第一年学生 {{ r.ft1_ay }} 人{% if r.ft1_ay >= 6 %} · 已达高档{% endif %}</div>{% endif %}</td>
+<td class="small">{% if r.students %}{% for p, n in r.students|groupby('program') %}{{ p }}×{{ n|length }} {% endfor %}{% else %}{{ [r.stu_term, r.stu_y1 and 'Y1 ' ~ r.stu_y1, r.stu_y2 and 'Y2 ' ~ r.stu_y2, r.stu_y3 and 'Y3 ' ~ r.stu_y3, r.stu_ft, r.stu_pt and '兼职 ' ~ r.stu_pt, r.stu_ap and 'AP ' ~ r.stu_ap]|select|join(' · ') }}{% endif %}</td>
+<td class="r">{{ r.fees|money }}</td><td class="r"><b>{{ r.amount|money }}</b>{% if r.lines|selectattr('kind','equalto','TOPUP')|list %}<br><span class="tag t-warn">含满 6 人补差</span>{% endif %}{% if r.mismatch %}<br><span class="tag t-warn" title="按规则计算 {{ r.calc|money }}，Excel 记录 {{ r.excel_commission|money }}">需核对</span>{% endif %}</td>
+<td><span class="tag t-{{ r.stage }}">{{ r.stage }}</span>{% set d = r.paid_on or r.to_accountant_on or r.confirmed_on or r.sent_on %}{% if d %}<div class="small mute">{{ d }}</div>{% endif %}</td>
+<td class="small">{{ r.pay_method or ('E-Transfer' if r.agent.etransfer else ('支票' if r.agent.payee else '')) }}</td><td><a class="small" href="{{ url_for('commission_edit', cid=r.id) }}">打开</a></td></tr>{% else %}<tr><td colspan="9" class="mute">本学期暂无结算单</td></tr>{% endfor %}</table></div>
+<p class="small mute">「需核对」：从 Excel 导入的旧记录，系统按规则算出的金额和 Excel 不同（常见于退费、补差额、特殊条款），金额仍以 Excel 为准。</p>{% endblock %}

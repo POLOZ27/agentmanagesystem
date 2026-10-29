@@ -1,0 +1,33 @@
+{% extends "base.html" %}{% block body %}<h1>{{ '新代理入驻' if new else '编辑代理：' ~ a.name }}</h1>
+<form method="post" action="{{ url_for('agent_new') if new else url_for('agent_detail', aid=a.id) }}" class="card"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<h2>基本信息</h2><div class="grid">
+<div><label>代理名称 / 机构 *</label><input name="name" value="{{ a.name or '' }}" required></div>
+<div><label>公司法定名称（写进合同 Party B）</label><input name="legal_name" value="{{ a.legal_name or '' }}" placeholder="留空则用代理名称"></div>
+<div><label>代理编号{% if new %}（自动生成，可修改）{% endif %}</label><input name="code" value="{{ a.code or '' }}"></div>
+<div><label>联系人 / 负责人</label><input name="contact" value="{{ a.contact or '' }}"></div>
+<div><label>邮箱（用于 News 和通知）</label><input name="email" type="email" value="{{ a.email or '' }}"></div>
+<div><label>电话 / WhatsApp / 微信</label><input name="phone" value="{{ a.phone or '' }}"></div>
+<div><label>国家</label><input name="country" value="{{ a.country or '' }}"></div>
+<div><label>城市</label><input name="city" value="{{ a.city or '' }}"></div>
+<div><label>地址（写进合同）</label><input name="address" value="{{ a.address or '' }}"></div>
+<div><label>网站</label><input name="website" value="{{ a.website or '' }}"></div>
+<div><label>状态</label><select name="status">{% for s in STATUSES %}<option {{ 'selected' if s==a.status }}>{{ s }}</option>{% endfor %}</select></div>
+<div><label>来源</label><input name="source" value="{{ a.source or '' }}" placeholder="例如：展会、转介绍、开发新代理"></div></div>
+
+<h2 style="margin-top:20px">代理等级与佣金</h2>
+<p class="small mute">新合同只有两个等级：第一年按学年人数，1–5 人基础比例，满 6 人起高档；第二年 10%，第三年 5%；兼职 15%，AP 10%。老代理沿用旧合同比例时选「旧合同自定义」。{% if a.scheme_text %}Excel 原写法：「{{ a.scheme_text }}」{% endif %}</p>
+<div class="grid"><div><label>等级</label><select name="level" id="level">
+{% for k, v in LEVELS.items() %}<option value="{{ k }}" {{ 'selected' if a.level==k }}>{{ v.label }}</option>{% endfor %}<option value="" {{ 'selected' if not a.level }}>旧合同自定义比例</option></select></div></div>
+<div class="grid" id="custom">{% set r = a.rates or ['', '', ''] %}
+<div><label>Year One %</label><input name="rate_y1" value="{{ r[0] }}"></div><div><label>Year Two %</label><input name="rate_y2" value="{{ r[1] }}"></div><div><label>Year Three %</label><input name="rate_y3" value="{{ r[2] }}"></div></div>
+
+<h2 style="margin-top:20px">付款与合同</h2><div class="grid">
+<div><label>E-Transfer 地址</label><input name="etransfer" value="{{ a.etransfer or '' }}"></div>
+<div><label>支票抬头</label><input name="payee" value="{{ a.payee or '' }}"></div>
+<div><label>合同到期日</label><input type="date" name="contract_expiry" value="{{ a.contract_expiry or '' }}"></div>
+<div><label>收款方类型（T4A 用）</label><select name="entity_type"><option value="">按名称自动判断</option><option value="individual" {{ 'selected' if a.entity_type=='individual' }}>个人 / 独资（未注册公司）</option><option value="corporation" {{ 'selected' if a.entity_type=='corporation' }}>注册公司 Inc. / Ltd.</option></select></div>
+<div><label>SIN / BN（加拿大代理开 T4A 用，加密保存）</label><input name="tax_number" value="{{ a.tax_number or '' }}" autocomplete="off"></div></div>
+<label>银行信息 / 付款备注</label><input name="detail" value="{{ a.detail or '' }}"><label>备注</label><input name="notes" value="{{ a.notes or '' }}">
+<p><button class="btn">保存</button> <a class="btn ghost" href="{{ url_for('agents_list') if new else url_for('agent_detail', aid=a.id) }}">取消</a></p></form>
+{% if not new %}<form method="post" action="{{ url_for('agent_delete', aid=a.id) }}" onsubmit="return confirm('确定删除这个代理？它的结算单、学生申请和合同会一起放进回收站，30 天内可以恢复。')"><input type="hidden" name="_csrf" value="{{ csrf }}"><p><button class="btn ghost" style="color:#b42318">删除这个代理</button></p></form>{% endif %}
+<script>const l=document.getElementById('level'),c=document.getElementById('custom');function t(){c.style.display=l.value?'none':''}l.onchange=t;t();</script>{% endblock %}

@@ -1,0 +1,3 @@
+{% extends "portal/base.html" %}{% block body %}<div class="center card"><h1>Check your email</h1>
+<p class="small mute">If {{ email }} is registered as a Johnathan Academy agent, a sign-in code is on its way. It is valid for 10 minutes.</p>
+<form method="post"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>Sign-in code</label><input name="code" inputmode="numeric" maxlength="6" required autofocus autocomplete="one-time-code"><p><button class="btn">Sign in</button> <a class="small" href="{{ url_for('portal_login') }}">Use another email</a></p></form></div>{% endblock %}

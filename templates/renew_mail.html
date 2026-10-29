@@ -1,0 +1,31 @@
+{% extends "base.html" %}{% block body %}{% set lv = LEVELS[r.level] %}
+<div class="toolbar" style="flex-wrap:wrap"><h1 style="margin:0">续签邮件 · {{ a.name }}</h1><span class="tag lv-{{ r.level }}">{{ '高级' if r.level == 'premier' else '标准级' }} {{ lv.y1 }}% / {{ lv.y1_6 }}%</span><span style="flex:1"></span>
+<span class="small mute">翻译成</span><select id="lang" style="width:auto"><option value="">（不翻译，只发英文）</option>{% for k, v in langs.items() %}<option value="{{ k }}" {{ 'selected' if k == lang }}>{{ v }}</option>{% endfor %}</select>
+<select id="how" style="width:auto"><option value="both">英文 + 译文</option><option value="only">只要译文</option></select>
+<button class="btn ghost small" id="tr" type="button">🌐 翻译</button><button class="btn ghost small" id="reset" type="button" hidden>恢复英文</button></div>
+<form method="post" class="card" id="f"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="lang" id="langval" value="{{ lang }}">
+<p class="small mute" style="margin-top:0">{% if lang %}按代理所在国家（{{ a.country }}）预选了 {{ langs[lang] }}。{% elif a.country %}{{ a.country }} 没有对应的翻译语言，默认只发英文；需要的话在右上角选语言。{% endif %}翻译用学校服务器上的本地模型，大约要 1 分钟，翻译完可以再改。</p>
+<div class="grid"><div><label>收件人</label><input name="to" type="email" value="{{ a.email or '' }}" required></div>
+<div><label>附件</label><div style="padding:8px 0">📎 <a href="{{ url_for('contract_edit', aid=a.id, i=r.contract, back=request.path) }}">{{ c.name }}</a> <span class="small mute">（点开可在线预览 / 修改）</span></div></div></div>
+<label>主题</label><input name="subject" id="subject" required value="{{ tpl.subject }}">
+<label>正文</label><textarea name="body" id="body" required style="min-height:420px">{{ tpl.body }}</textarea>
+<p><button class="btn" onclick="return confirm('把续签合同和这封邮件发给 '+this.form.to.value+'？')">发出</button> <a class="btn ghost" href="{{ url_for('renewals') }}">取消</a></p></form>
+<script>
+const $ = id => document.getElementById(id), en = {subject: $('subject').value, body: $('body').value};
+$('lang').onchange = () => $('langval').value = $('lang').value;
+$('reset').onclick = () => { $('subject').value = en.subject; $('body').value = en.body; $('reset').hidden = true; };
+$('tr').onclick = async () => {
+  const lang = $('lang').value; if (!lang) { alert('先在左边选语言'); return; }
+  const btn = $('tr'); btn.disabled = true; btn.textContent = '翻译中…';
+  const fd = new FormData(); fd.append('_csrf', '{{ csrf }}'); fd.append('lang', lang);
+  fd.append('subject', en.subject); fd.append('body', en.body);
+  try {
+    const res = await fetch('{{ url_for("mail_translate") }}', {method: 'POST', body: fd}), j = await res.json();
+    if (j.error) throw new Error(j.error);
+    if ($('how').value === 'only') { $('subject').value = j.subject; $('body').value = j.body; }
+    else { $('subject').value = en.subject + ' | ' + j.subject; $('body').value = en.body + '\n\n— ' + $('lang').selectedOptions[0].text + ' —\n\n' + j.body; }
+    $('reset').hidden = false;
+  } catch (e) { alert('翻译失败：' + e.message); }
+  btn.disabled = false; btn.textContent = '🌐 翻译';
+};
+</script>{% endblock %}

@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block body %}<h1>学生申请进度</h1>
+<div class="card"><ol class="flow">{% for g in STUDENT_STAGES[:-1] %}<li class="{{ 'cur' if f.stage == g }}"><a href="?stage={{ g }}" style="color:inherit"><b>{{ g }} · {{ counts[g] }}</b>{{ STUDENT_HINTS[g] }}</a></li>{% endfor %}</ol>
+<p class="small mute" style="margin:0">学生「已入学」后，在学生页面一键加入代理当学期的结算单，佣金自动计算。未入学 {{ counts['未入学'] }} 人。</p></div>
+<form class="toolbar" style="flex-wrap:wrap"><input name="q" value="{{ f.q }}" placeholder="搜索学生或代理" style="width:200px">
+<select name="stage"><option value="">全部进度</option>{% for g in STUDENT_STAGES %}<option {{ 'selected' if f.stage==g }}>{{ g }}</option>{% endfor %}</select>
+<select name="agent"><option value="">全部代理</option>{% for a in agent_list %}<option value="{{ a.id }}" {{ 'selected' if f.agent==a.id }}>{{ a.name }}</option>{% endfor %}</select>
+<select name="intake"><option value="">全部入学学期</option>{% for t in intakes %}<option {{ 'selected' if f.intake==t }}>{{ t }}</option>{% endfor %}</select>
+<button class="btn ghost">筛选</button><span style="flex:1"></span><a class="btn" href="{{ url_for('student_edit', agent=f.agent) }}">+ 新申请</a></form>
+<div class="card" style="padding:0"><table><tr><th>学生</th><th>代理</th><th>项目</th><th>入学学期</th><th>进度</th><th>更新</th><th>下一步</th></tr>
+{% for s in rows %}{% set i = STUDENT_STAGES.index(s.stage) if s.stage in STUDENT_STAGES else 0 %}<tr>
+<td><a href="{{ url_for('student_edit', sid=s.id) }}">{{ s.name }}</a>{% if s.grade %} <span class="small mute">G{{ s.grade }}</span>{% endif %}{% if s.country %}<div class="small mute">{{ s.country }}</div>{% endif %}</td>
+<td class="small">{% if s.agent_id in agents %}<a href="{{ url_for('agent_detail', aid=s.agent_id) }}">{{ agents[s.agent_id].name }}</a>{% else %}<span class="mute">直接申请</span>{% endif %}</td>
+<td class="small">{{ PROGRAMS.get(s.program, s.program) }}</td><td class="small">{{ s.intake }}</td>
+<td><span class="tag {{ 't-活跃' if s.stage=='已入学' else ('t-bad' if s.stage=='未入学' else 't-已发结算单') }}">{{ s.stage }}</span>{% if s.commission_id %} <span class="tag">已入结算单</span>{% endif %}</td>
+<td class="small mute">{{ (s.history or {}).get(s.stage, '') }}</td>
+<td>{% if i < 5 %}<form method="post" action="{{ url_for('student_stage', sid=s.id) }}"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="back" value="{{ request.full_path }}">
+<button class="btn ghost small" name="stage" value="{{ STUDENT_STAGES[i + 1] }}">→ {{ STUDENT_STAGES[i + 1] }}</button></form>
+{% elif s.stage == '已入学' and not s.commission_id %}<form method="post" action="{{ url_for('student_to_statement', sid=s.id) }}"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn ghost small">加入结算单</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="7" class="mute">没有符合条件的学生</td></tr>{% endfor %}</table></div>{% endblock %}

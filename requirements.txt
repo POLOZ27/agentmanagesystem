@@ -1,0 +1,11 @@
+flask>=3.0
+cryptography>=42
+argon2-cffi>=23
+pyotp>=2.9
+openpyxl>=3.1
+python-docx>=1.1
+anthropic>=0.70
+httpx>=0.27
+waitress>=3.0
+pypdfium2>=4.30
+pillow>=10

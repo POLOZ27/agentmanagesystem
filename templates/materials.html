@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block body %}<h1>宣传资料库</h1>
+<div class="card"><p class="small" style="margin:0">学校的宣传资料都在 OneDrive 上（「宣传」文件夹和招生处的 Business partner 共享文件夹）。这里记下每份资料和它的共享链接，写邮件、发 Start Letter / 续签信时一键插入，勾选「给代理」的会出现在代理自助页里。文件本身不用搬过来；也可以上传一份（加密保存）。
+{% if kit %}<br>Start Letter 和续签信里的资料链接：<a href="{{ kit }}" target="_blank" rel="noopener">合作伙伴资料包</a>{% endif %}</p></div>
+{% if missing %}<div class="flash" style="background:var(--warnbg);color:var(--warn)">{{ missing|length }} 份资料还没有共享链接：在 OneDrive 里右键 → 共享 → 复制链接，贴到下面对应的资料里。</div>{% endif %}
+<div class="row"><div class="card" style="padding:0;flex:2"><table><tr><th>资料</th><th>类别</th><th>语言</th><th>给代理</th><th>链接 / 位置</th></tr>
+{% for x in rows %}<tr><td><a href="{{ url_for('materials', mid=x.id) }}">{{ x.title }}</a></td><td class="small">{{ x.kind }}</td><td class="small">{{ x.lang }}</td><td class="small">{{ '✓' if x.share else '' }}</td>
+<td class="small">{% if x.url %}<a href="{{ x.url }}" target="_blank" rel="noopener">打开链接</a>{% endif %}{% if x.file %} <a href="{{ url_for('file_download', fid=x.file.fid, name=x.file.name) }}">📄 {{ x.file.name }}</a>{% endif %}
+{% if not x.url and not x.file %}<span class="tag t-warn">缺链接</span>{% endif %}<div class="mute">{{ x.note }}</div></td></tr>{% endfor %}</table></div>
+<form method="post" enctype="multipart/form-data" action="{{ url_for('materials', mid=m.id) if m else url_for('materials') }}" class="card"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<h2>{{ '编辑：' ~ m.title if m else '添加资料' }}</h2><label>名称</label><input name="title" value="{{ m.title if m else '' }}" required>
+<div class="grid"><div><label>类别</label><select name="kind">{% for k in kinds %}<option {{ 'selected' if m and m.kind == k }}>{{ k }}</option>{% endfor %}</select></div>
+<div><label>语言</label><input name="lang" value="{{ m.lang if m else '' }}" placeholder="中文 / 英文 / 西语…"></div></div>
+<label>共享链接（OneDrive「复制链接」）</label><input name="url" value="{{ m.url if m else '' }}" placeholder="https://johnathanacademy-my.sharepoint.com/…">
+<label>说明 / OneDrive 位置</label><input name="note" value="{{ m.note if m else '' }}">
+<label>或上传文件（可选）</label><input type="file" name="file">
+<label class="steps"><input type="checkbox" name="share" value="1" {{ 'checked' if not m or m.share }}> 给代理（出现在代理自助页，写邮件时可插入）</label>
+<p><button class="btn">保存</button>{% if m %} <button class="btn danger" name="delete" value="1" onclick="return confirm('删除？')">删除</button> <a class="btn ghost" href="{{ url_for('materials') }}">添加新资料</a>{% endif %}</p></form></div>{% endblock %}

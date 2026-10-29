@@ -1,0 +1,28 @@
+{% extends "base.html" %}{% block body %}<h1>{{ '跟进邮件' if kind else '开发邮件' }} · 发给 {{ picked|length }} 个代理</h1>
+<form method="post" id="f"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="go" value="1"><input type="hidden" name="kind" value="{{ kind }}">
+{% for p in picked %}<input type="hidden" name="ids" value="{{ p.id }}">{% endfor %}<input type="hidden" name="tpl" value="{{ tpl.id }}">
+<div class="card"><div class="toolbar" style="flex-wrap:wrap"><label style="margin:0">邮件模板</label>
+<select id="tplsel">{% for t in tpls %}<option value="{{ t.id }}" {{ 'selected' if t.id == tpl.id }}>{{ t.name }}{{ '（跟进）' if t.kind == 'followup' and '跟进' not in t.name }}</option>{% endfor %}</select>
+<a class="small" href="{{ url_for('mail_templates') }}">管理模板</a></div><p class="small mute" style="margin-top:0">每封邮件：英文正文在上，下面附上代理所在国家的语言版本，最后是退订说明。<code>{name}</code> 自动换成联系人或机构名。改了英文后，可以用「AI 重新翻译」同步译文。</p>
+<div class="mailsplit">
+<div><h2>English（主邮件）</h2><label>主题</label><input name="subject" id="subject" value="{{ english.subject }}">
+<label>正文</label><textarea name="body" id="body" style="min-height:420px">{{ english.body }}</textarea></div>
+<div><div class="toolbar" style="margin:0"><h2 style="margin:0">当地语言版本</h2><span style="flex:1"></span></div>
+{% if langs %}<div class="langtabs">{% for l in langs %}<button type="button" data-l="{{ l }}" class="{{ 'on' if loop.first }}">{{ translations[l].label }}</button>{% endfor %}</div>
+{% for l in langs %}<div class="trpane" data-l="{{ l }}" {{ '' if loop.first else 'hidden' }}>
+<label>{{ translations[l].label }}（发给：{% for p in picked if lang_for(p.country) == l %}{{ p.agency }}{{ '、' if not loop.last }}{% endfor %}）</label>
+<textarea name="tr_{{ l }}" style="min-height:384px">{{ translations[l].body }}</textarea>{% if not translations[l].body %}<p class="small" style="color:var(--warn)">这个模板还没有{{ translations[l].label }}版本：点「AI 翻译」生成，或留空只发英文。</p>{% endif %}
+<div class="toolbar" style="margin-top:6px"><button type="button" class="btn ghost aitr" data-l="{{ l }}" {{ '' if has_ai else 'disabled title="需要在设置里填 Claude API Key"' }}>AI 翻译</button><span class="small mute st"></span><span style="flex:1"></span><span class="small mute">清空 = 只发英文</span></div></div>{% endfor %}
+{% else %}<p class="mute">所选代理都在英语国家或未填国家，只发英文。</p>{% endif %}</div></div></div>
+<div class="card" style="padding:0"><h2 style="padding:14px 16px 0">收件人</h2><table><tr><th>机构</th><th>国家</th><th>邮箱</th><th>附带语言</th><th>已发</th></tr>
+{% for p in picked %}{% set l = lang_for(p.country) %}<tr><td>{{ p.agency }} <span class="tier tier-{{ p.tier }}">{{ p.tier or '–' }}</span></td><td class="small">{{ COUNTRY_ZH.get(p.country, p.country) }}</td>
+<td class="small">{{ p.email or '—' }}{% if not p.email or p.unsubscribed %} <span class="tag t-bad">跳过</span>{% endif %}</td><td class="small">{{ LANG_LABELS.get(l, '仅英文') if l else '仅英文' }}</td><td class="small mute">{{ p.emails_sent or 0 }} 封</td></tr>{% endfor %}</table></div>
+<p><label class="steps" style="display:inline-flex;margin-right:12px"><input type="checkbox" name="save_tpl" value="1"> 把改动（含译文）存回这个模板</label><button class="btn" onclick="return confirm('发出 {{ picked|selectattr('email')|rejectattr('unsubscribed')|list|length }} 封邮件？')">✉ 确认发送</button> <a class="btn ghost" href="{{ url_for('prospects') }}">返回</a></p></form>
+<script>
+document.getElementById('tplsel').onchange=e=>{const u=new URL(location.href);u.searchParams.set('tpl',e.target.value);location.href=u.toString()};
+document.querySelectorAll('.langtabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.langtabs button').forEach(x=>x.classList.toggle('on',x===b));
+ document.querySelectorAll('.trpane').forEach(p=>p.hidden=p.dataset.l!==b.dataset.l)});
+document.querySelectorAll('.aitr').forEach(b=>b.onclick=async()=>{const pane=b.closest('.trpane'),st=pane.querySelector('.st');st.textContent='翻译中…';
+ const fd=new FormData();fd.append('_csrf','{{ csrf }}');fd.append('lang',b.dataset.l);fd.append('subject',document.getElementById('subject').value);fd.append('body',document.getElementById('body').value);
+ try{const r=await fetch('{{ url_for('prospects_translate') }}',{method:'POST',body:fd});const j=await r.json();if(j.error)throw new Error(j.error);pane.querySelector('textarea').value=j.body;st.textContent='已更新，建议快速看一遍';}catch(e){st.textContent='失败：'+e.message}});
+</script>{% endblock %}

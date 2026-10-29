@@ -1,0 +1,54 @@
+:root{--bg:#f5f7fa;--card:#fff;--ink:#1b2333;--mute:#5f6b7d;--line:#e2e6ec;--brand:#1f4e79;--brand2:#e7eff8;--ok:#127a4a;--okbg:#e5f5ec;--warn:#9a5b00;--warnbg:#fff3dc;--bad:#b42318;--badbg:#fdeceb;--head:#f9fafc;--chip:#edf0f4;--chipink:#3d4656;--hover:#f7faff;--field:#fff;--fieldline:#cbd2dc;--bar:#1f4e79;--btnink:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111722;--card:#182131;--ink:#e6ebf2;--mute:#97a3b6;--line:#2a3547;--brand:#7fb0e0;--brand2:#1d3048;--ok:#5fd19a;--okbg:#143326;--warn:#f0b65a;--warnbg:#3a2c12;--bad:#ff8a80;--badbg:#3d1b1b;--head:#1c2638;--chip:#243045;--chipink:#c9d2df;--hover:#1d2a3e;--field:#121a28;--fieldline:#34425a;--bar:#5d95cc;--btnink:#0d1520;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#111722;--card:#182131;--ink:#e6ebf2;--mute:#97a3b6;--line:#2a3547;--brand:#7fb0e0;--brand2:#1d3048;--ok:#5fd19a;--okbg:#143326;--warn:#f0b65a;--warnbg:#3a2c12;--bad:#ff8a80;--badbg:#3d1b1b;--head:#1c2638;--chip:#243045;--chipink:#c9d2df;--hover:#1d2a3e;--field:#121a28;--fieldline:#34425a;--bar:#5d95cc;--btnink:#0d1520;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;font:14px/1.5 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink)}
+a{color:var(--brand);text-decoration:none}a:hover{text-decoration:underline}
+.top{display:flex;align-items:center;gap:24px;flex-wrap:wrap;background:#1f4e79;color:#fff;padding:0 24px;height:52px}
+.top b{font-size:16px;letter-spacing:.5px}.top nav{display:flex;gap:4px;flex:1}
+.top nav a{color:#cfe0f0;padding:6px 12px;border-radius:6px}.top nav a.on,.top nav a:hover{background:rgba(255,255,255,.15);color:#fff;text-decoration:none}
+.top form{margin:0}.top .lockbtn{background:none;border:1px solid rgba(255,255,255,.4);color:#fff;padding:4px 10px;border-radius:6px;cursor:pointer}
+main{max-width:1240px;margin:0 auto;padding:24px}
+h1{font-size:22px;margin:0 0 16px}h2{font-size:16px;margin:0 0 12px}
+.row{display:flex;gap:16px;flex-wrap:wrap}.row>*{flex:1;min-width:260px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
+.kpi .n{font-size:26px;font-weight:600}.kpi .l{color:var(--mute);font-size:12px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--mute);font-weight:500;background:var(--head);position:sticky;top:0}
+td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}tr:hover td{background:var(--hover)}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;background:var(--chip);color:var(--chipink)}
+.t-活跃,.t-已付,.t-已发送{background:var(--okbg);color:var(--ok)}.t-洽谈中,.t-潜在,.t-已签约{background:var(--brand2);color:var(--brand)}
+.t-待付,.t-未读,.t-warn{background:var(--warnbg);color:var(--warn)}.t-不活跃,.t-终止,.t-bad{background:var(--badbg);color:var(--bad)}
+.btn{display:inline-block;background:var(--brand);color:var(--btnink);border:0;border-radius:7px;padding:7px 14px;cursor:pointer;font-size:14px}
+.btn:hover{text-decoration:none;opacity:.92}.btn.ghost{background:var(--card);color:var(--brand);border:1px solid var(--line)}.btn.danger{background:var(--bad);color:var(--btnink)}
+input,select,textarea{font:inherit;padding:7px 9px;border:1px solid var(--fieldline);border-radius:7px;width:100%;background:var(--field);color:var(--ink)}
+textarea{min-height:180px}label{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 16px}
+.bar{display:flex;align-items:center;gap:8px;margin:4px 0}.bar .b{background:var(--bar);height:14px;border-radius:3px}.bar .t{width:150px;font-size:12px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.flash{background:var(--okbg);color:var(--ok);padding:10px 14px;border-radius:8px;margin-bottom:16px}
+.mute{color:var(--mute)}.small{font-size:12px}.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px}.toolbar input,.toolbar select{width:auto}
+.center{max-width:420px;margin:80px auto}.mono{font-family:ui-monospace,Consolas,monospace;word-break:break-all}
+.steps label{display:flex;gap:8px;align-items:center;color:var(--ink);font-size:14px;margin:6px 0}.steps input{width:auto}
+.calc td{border:0;padding:3px 8px}.lock-note{font-size:12px;color:#cfe0f0}
+.tag{white-space:nowrap}
+.tablewrap{overflow-x:auto}
+@media (max-width:700px){main{padding:16px}.top{height:auto;padding:8px 16px;gap:8px}.top nav{flex-wrap:wrap;order:3;flex-basis:100%}.lock-note{display:none}.top b{flex:1}.row>*{min-width:100%}.toolbar{flex-wrap:wrap}}
+.card{overflow-x:auto}
+.flow{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 14px;padding:0;list-style:none;counter-reset:f}
+.flow li{flex:1;min-width:120px;padding:8px 10px;border-radius:8px;background:var(--chip);color:var(--chipink);font-size:12px;counter-increment:f}
+.flow li::before{content:counter(f) ". ";font-weight:600}.flow li.done{background:var(--okbg);color:var(--ok)}.flow li.cur{background:var(--brand);color:var(--btnink)}
+.flow li b{display:block;font-size:13px}
+.t-草稿{background:var(--chip)}.t-已发结算单,.t-已发邮件,.t-已跟进{background:var(--brand2);color:var(--brand)}.t-代理已确认,.t-已交会计,.t-已回复,.t-已约会议,.t-待审核{background:var(--warnbg);color:var(--warn)}.t-已转为代理{background:var(--okbg);color:var(--ok)}.t-不合适{background:var(--badbg);color:var(--bad)}
+.tier{display:inline-block;width:22px;text-align:center;border-radius:5px;font-weight:600;font-size:12px}.tier-A{background:var(--okbg);color:var(--ok)}.tier-B{background:var(--brand2);color:var(--brand)}.tier-C{background:var(--chip);color:var(--chipink)}
+.stepbox{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:8px 0;display:flex;gap:10px;align-items:flex-start}
+.stepbox .num{flex:none;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--chip);color:var(--chipink);font-weight:600;font-size:13px}
+.stepbox.done .num{background:var(--ok);color:var(--btnink)}.stepbox.cur{border-color:var(--brand);background:var(--hover)}.stepbox.cur .num{background:var(--brand);color:var(--btnink)}
+.stepbox .body{flex:1;min-width:0}.stepbox form{margin-top:6px}
+.inline{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}.inline>div{flex:1;min-width:140px}.inline label{margin-top:0}
+.mailsplit{display:grid;grid-template-columns:1fr 1fr;gap:16px}.langtabs{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;margin-bottom:8px}
+.langtabs button{width:auto;padding:4px 10px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:6px;cursor:pointer;font-size:12px}.langtabs button.on{background:var(--brand);color:var(--btnink);border-color:var(--brand)}
+.chk{width:auto}.pill{display:inline-flex;gap:4px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:2px 10px;margin:2px;font-size:12px;cursor:pointer;color:var(--ink)}.pill input{width:auto;margin:0}
+@media (max-width:900px){.mailsplit{grid-template-columns:1fr}}
+
+.backlink{display:inline-block;margin:0 0 10px;font-size:13px;color:var(--mute)}.backlink:hover{color:var(--brand)}
+[hidden]{display:none!important}
+.lv-premier{background:#e7dcff;color:#4b2a9a}.lv-standard{background:#dceeff;color:#1d4f8a}

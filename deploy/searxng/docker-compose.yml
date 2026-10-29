@@ -1,0 +1,13 @@
+# 开发新代理用的自建搜索（SearXNG）。只监听本机，不对外开放。
+# 用法：cd deploy/searxng && docker compose up -d
+services:
+  searxng:
+    image: searxng/searxng:latest   # 稳定后可改成固定版本号
+    container_name: agent-searxng
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8888:8080"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://127.0.0.1:8888/

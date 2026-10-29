@@ -1,0 +1,47 @@
+{% extends "base.html" %}{% block body %}<h1>开发新代理 <span class="mute small">{{ counts.values()|sum - counts.get('待审核', 0) }} 个潜在代理</span></h1>
+<div class="toolbar" style="flex-wrap:wrap">{% for s in PROSPECT_STAGES %}<a class="tag t-{{ s }}" href="?stage={{ s }}">{{ s }} {{ counts.get(s, 0) }}</a>{% endfor %}{% if f.stage or f.country or f.tier or f.q %}<a class="small" href="{{ url_for('prospects') }}">清除筛选</a>{% endif %}</div>
+
+<div class="row">
+<form method="post" action="{{ url_for('prospects_search') }}" class="card" style="flex:2"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<h2>🔎 AI 联网搜索代理</h2>
+<p class="small mute">AI 会在网上找目标国家做 K-12 / 高中留学的中介，整理出规模等级、联系人、邮箱、电话和来源链接。结果先进入「待审核」，你确认后才会加入名单。只发送搜索条件，不会发送任何代理、学生或佣金数据。</p>
+{% for region, cs in regions.items() %}<div style="margin:6px 0"><span class="small mute" style="display:inline-block;width:110px">{{ region }}</span>{% for c in cs %}<label class="pill"><input type="checkbox" name="countries" value="{{ c }}"> {{ COUNTRY_ZH.get(c, c) }}</label>{% endfor %}</div>{% endfor %}
+<div class="inline" style="margin-top:8px"><div><label>每个国家找几个</label><select name="n">{% for n in [5,10,15,20] %}<option {{ 'selected' if n==10 }}>{{ n }}</option>{% endfor %}</select></div>
+<div style="flex:3"><label>额外要求（可选）</label><input name="extra" placeholder="例如：优先在首都、有加拿大合作经验、做暑期营"></div>
+<div><button class="btn" {{ '' if has_ai else 'disabled' }}>开始搜索</button></div></div>
+{% if not has_ai %}<p class="small">{% if ai_mode == 'claude' %}需要先在 <a href="{{ url_for('settings_page') }}">设置与安全</a> 里填 Claude API Key（加密保存）。{% else %}本地模式：需要先在 <a href="{{ url_for('settings_page') }}">设置与安全</a> 里填好学校服务器的本地模型地址和 SearXNG 搜索地址，点「测试 AI 连接」。{% endif %}</p>
+{% elif ai_mode != 'claude' %}<p class="small mute">使用学校服务器上的本地模型和自建搜索，数据不出服务器。</p>{% endif %}
+{% if jobs %}<table style="margin-top:10px">{% for j in jobs %}<tr><td class="small mute">{{ j.started|replace('T',' ') }}</td><td class="small">{% for c in j.countries %}{{ COUNTRY_ZH.get(c, c) }}{{ '、' if not loop.last }}{% endfor %}</td><td><span class="tag {{ 't-warn' if j.status=='进行中' else ('t-bad' if j.status=='失败' else 't-活跃') }}">{{ j.status }}</span></td><td class="small">{{ j.progress }}</td></tr>{% endfor %}</table>{% endif %}</form>
+<form method="post" enctype="multipart/form-data" action="{{ url_for('prospects_import') }}" class="card"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<h2>导入已有名单</h2><p class="small mute">支持你现在的 Agent Tracker Excel（第一行有 Agency 列的工作表都会读取），重复的机构会跳过。</p>
+<input type="file" name="file" accept=".xlsx" required><p><button class="btn ghost">导入</button></p>
+<h2 style="margin-top:16px">规模等级</h2><p class="small"><span class="tier tier-A">A</span> 大型：多城市办公室 / 年送生 100+ / 知名品牌<br><span class="tier tier-B">B</span> 中型：独立办公室，有高中留学业务<br><span class="tier tier-C">C</span> 小型：个人顾问或刚起步</p></form></div>
+
+{% if review %}<form method="post" action="{{ url_for('prospects_review') }}" class="card" style="padding:0"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div class="toolbar" style="padding:12px 16px 0;flex-wrap:wrap"><h2 style="margin:0">待审核 · AI 找到 {{ review|length }} 个</h2><span class="small mute">勾选要保留的，其余会删除</span><span style="flex:1"></span><button class="btn">确认审核</button></div>
+<table><tr><th><input type="checkbox" class="chk" onclick="this.closest('table').querySelectorAll('[name=keep]').forEach(c=>c.checked=this.checked)" checked></th><th>等级</th><th>机构</th><th>国家 / 城市</th><th>联系人</th><th>邮箱 / 电话</th><th>规模依据 / 适合度</th><th>来源</th></tr>
+{% for p in review %}<tr><td><input type="hidden" name="ids" value="{{ p.id }}"><input type="checkbox" class="chk" name="keep" value="{{ p.id }}" checked></td><td><span class="tier tier-{{ p.tier }}">{{ p.tier or '?' }}</span></td>
+<td><b>{{ p.agency }}</b>{% if p.website %}<div class="small"><a href="{{ p.website }}" target="_blank" rel="noopener">{{ p.website|replace('https://','')|replace('http://','') }}</a></div>{% endif %}</td>
+<td class="small">{{ COUNTRY_ZH.get(p.country, p.country) }} · {{ p.city }}</td><td class="small">{{ p.contact }}<div class="mute">{{ p.role }}</div></td>
+<td class="small">{{ p.email }}<div class="mute">{{ p.phone }} {{ p.whatsapp and 'WA ' ~ p.whatsapp }}</div></td><td class="small">{{ p.size_evidence }}<div class="mute">{{ p.k12_fit }}{% if p.ai_checked %} · {{ p.ai_checked }}{% endif %}</div></td>
+<td class="small">{% if p.source_url %}<a href="{{ p.source_url }}" target="_blank" rel="noopener">链接</a>{% endif %}</td></tr>{% endfor %}</table></form>{% endif %}
+
+<form method="get" action="{{ url_for('outreach') }}" class="card" style="padding:0" id="sel">
+<div class="toolbar" style="padding:12px 16px 0;flex-wrap:wrap">
+<select form="filt" name="country" onchange="document.getElementById('filt').submit()"><option value="">全部国家</option>{% for c in countries %}<option value="{{ c }}" {{ 'selected' if c==f.country }}>{{ COUNTRY_ZH.get(c, c) }}</option>{% endfor %}</select>
+<select form="filt" name="tier" onchange="document.getElementById('filt').submit()"><option value="">全部等级</option>{% for t in 'ABC' %}<option {{ 'selected' if t==f.tier }}>{{ t }}</option>{% endfor %}</select>
+<select form="filt" name="stage" onchange="document.getElementById('filt').submit()"><option value="">全部阶段</option>{% for s in PROSPECT_STAGES %}<option {{ 'selected' if s==f.stage }}>{{ s }}</option>{% endfor %}</select>
+<input form="filt" name="q" value="{{ f.q }}" placeholder="搜索机构、联系人、城市" style="width:200px">
+<span style="flex:1"></span><span class="small mute" id="cnt">已选 0 个</span>
+<button class="btn ghost" name="kind" value="followup">发跟进邮件</button><button class="btn">✉ 一键发开发邮件</button></div>
+<table><tr><th><input type="checkbox" class="chk" id="all"></th><th>等级</th><th>机构</th><th>国家 / 城市</th><th>联系人</th><th>邮箱</th><th>阶段</th><th>上次联系</th></tr>
+{% for p in rows if p.stage != '待审核' %}<tr><td>{% if p.email and not p.unsubscribed and p.stage not in ['已转为代理','不合适'] %}<input type="checkbox" class="chk pick" name="ids" value="{{ p.id }}">{% endif %}</td>
+<td><span class="tier tier-{{ p.tier }}">{{ p.tier or '–' }}</span></td><td><a href="{{ url_for('prospect_detail', pid=p.id) }}">{{ p.agency }}</a>{% if p.source and 'AI' in p.source %} <span class="tag">AI</span>{% endif %}</td>
+<td class="small">{{ COUNTRY_ZH.get(p.country, p.country) }}{{ ' · ' ~ p.city if p.city }}</td><td class="small">{{ p.contact }}</td>
+<td class="small">{{ p.email or '—' }}{% if p.unsubscribed %} <span class="tag t-bad">已退订</span>{% endif %}</td>
+<td><span class="tag t-{{ p.stage or '未联系' }}">{{ p.stage or '未联系' }}</span>{% if p in followups %} <span class="tag t-warn">该跟进</span>{% endif %}</td><td class="small mute">{{ p.last_email_on or '' }}</td></tr>
+{% else %}<tr><td colspan="8" class="mute">还没有潜在代理。用上面的 AI 搜索，或导入 Agent Tracker。</td></tr>{% endfor %}</table></form>
+<form id="filt" method="get"></form>
+<script>const picks=[...document.querySelectorAll('.pick')],cnt=document.getElementById('cnt');function u(){cnt.textContent='已选 '+picks.filter(p=>p.checked).length+' 个'}
+picks.forEach(p=>p.onchange=u);document.getElementById('all').onchange=e=>{picks.forEach(p=>p.checked=e.target.checked);u()};
+document.getElementById('sel').onsubmit=e=>{if(!picks.some(p=>p.checked)){alert('先勾选要发的代理');e.preventDefault()}};</script>{% endblock %}

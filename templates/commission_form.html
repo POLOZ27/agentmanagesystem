@@ -1,0 +1,82 @@
+{% extends "base.html" %}{% block body %}
+{% set stage = c.stage or '草稿' %}{% set si = STAGES.index(stage) if stage in STAGES else 0 %}
+<div class="toolbar" style="flex-wrap:wrap"><h1 style="margin:0">结算单{% if c.agent %} · {{ c.agent.name }}{% endif %}</h1>{% if c.term %}<span class="mute">{{ c.term }}</span>{% endif %}{% if c.id %}<span class="tag t-{{ stage }}">{{ stage }}</span>{% endif %}<span style="flex:1"></span>
+{% if c.agent_id %}<a class="btn ghost" href="{{ url_for('agent_detail', aid=c.agent_id) }}">代理资料</a>{% endif %}</div>
+{% if c.id %}<ol class="flow">{% for s in STAGES %}<li class="{{ 'done' if loop.index0 < si or stage=='已付' else ('cur' if loop.index0 == si else '') }}"><b>{{ s }}</b>{{ [None, c.sent_on, c.confirmed_on, c.to_accountant_on, c.paid_on][loop.index0] or '' }}</li>{% endfor %}</ol>{% endif %}
+
+{% if c.id %}<div class="card"><h2>下一步</h2>
+{% if stage == '草稿' %}
+<p class="small mute">检查下面的学生明细和佣金金额，确认无误后发给代理。发出后金额锁定，对账单 Excel 作为附件。</p>
+<div class="inline"><a class="btn ghost" href="{{ url_for('commission_statement', cid=c.id) }}">下载对账单 Excel</a>
+<form method="post" action="{{ url_for('commission_send', cid=c.id) }}" onsubmit="return confirm('把 {{ c.calc|money }} 的结算单发给 {{ c.agent.email }}？')"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn" {{ 'disabled' if not c.agent.email or not c.lines }}>发结算单给代理{% if c.agent.email %}（{{ c.agent.email }}）{% endif %}</button></form></div>
+{% if not c.agent.email %}<p class="small" style="color:var(--bad)">这个代理还没有邮箱。</p>{% endif %}
+{% elif stage == '已发结算单' %}
+<p class="small mute">{{ c.sent_on }} 已发给代理。代理回信确认后，在这里登记（可以直接选收件箱里代理发来的发票附件）。</p>
+<form method="post" enctype="multipart/form-data" action="{{ url_for('commission_confirm', cid=c.id) }}" class="inline"><input type="hidden" name="_csrf" value="{{ csrf }}">
+{% if inbound %}<div style="flex:2"><label>代理来信里的附件</label><select name="from_mail"><option value="">（不选）</option>{% for m, f in inbound %}<option value="{{ f.name }}|{{ f.fid }}">{{ f.name }} · {{ m.subject }} · {{ m.at[:10] }}</option>{% endfor %}</select></div>{% endif %}
+<div style="flex:2"><label>或上传发票</label><input type="file" name="invoice"></div><div><button class="btn">代理已确认</button></div></form>
+{% elif stage == '代理已确认' %}
+<p class="small mute">代理 {{ c.confirmed_on }} 已确认{% if c.invoice %}，发票：<a href="{{ url_for('file_download', fid=c.invoice.fid, name=c.invoice.name) }}">📎 {{ c.invoice.name }}</a>{% endif %}。发给会计时只包含付款需要的信息：金额、收款方、付款方式、对账单和发票。</p>
+<form method="post" action="{{ url_for('commission_accountant', cid=c.id) }}" class="inline"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div><label>付款方式</label><select name="method">{% for m in ['E-Transfer','Cheque','Wire Transfer'] %}<option {{ 'selected' if (m=='E-Transfer' and c.agent.etransfer) or (m=='Cheque' and not c.agent.etransfer) }}>{{ m }}</option>{% endfor %}</select></div>
+<div style="flex:2" class="small">{{ c.agent.etransfer or c.agent.payee or c.agent.detail or '代理资料里没有付款信息' }}</div>
+<div><button class="btn" {{ 'disabled' if not cfg.accountant_email }}>发给会计{% if cfg.accountant_email %}（{{ cfg.accountant_email }}）{% endif %}</button></div></form>
+{% if not cfg.accountant_email %}<p class="small">先到 <a href="{{ url_for('settings_page') }}">设置与安全</a> 填会计邮箱。</p>{% endif %}
+{% elif stage == '已交会计' %}
+<p class="small mute">{{ c.to_accountant_on }} 已交会计（{{ c.pay_method }}）。会计付款后登记：</p>
+<form method="post" enctype="multipart/form-data" action="{{ url_for('commission_paid', cid=c.id) }}" class="inline"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div><label>付款日期</label><input type="date" name="paid_on"></div><div><label>方式</label><input name="method" value="{{ c.pay_method or '' }}"></div>
+<div><label>支票号 / 参考号</label><input name="ref"></div><div style="flex:2"><label>付款凭证（可选）</label><input type="file" name="proof"></div>
+<div style="flex:2"><label class="steps" style="margin:0"><input type="checkbox" name="notify" value="1" checked> 发付款通知给代理</label></div><div><button class="btn">登记已付</button></div></form>
+{% elif stage == '已付' %}
+<p>✅ {{ c.paid_on }} 已付 {{ c.amount|money }}（{{ c.pay_method or '' }}{{ ' · ' ~ c.pay_ref if c.pay_ref }}）{% if c.proof %} · <a href="{{ url_for('file_download', fid=c.proof.fid, name=c.proof.name) }}">📎 付款凭证</a>{% endif %}{% if c.invoice %} · <a href="{{ url_for('file_download', fid=c.invoice.fid, name=c.invoice.name) }}">📎 发票</a>{% endif %}</p>
+{% else %}<p class="small mute">历史导入记录：{{ c.paid_on or '' }}</p>{% endif %}
+{% if c.locked and stage != '已付' %}<form method="post" action="{{ url_for('commission_reopen', cid=c.id) }}" style="margin-top:10px" onsubmit="return confirm('退回草稿后可以修改金额，需要重新发给代理。')"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn ghost small">退回草稿修改</button></form>{% endif %}
+</div>{% endif %}
+
+{% set sc = agent_scheme(c.agent) if c.agent else None %}
+<form method="post" class="card" id="f"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<h2>学生明细{% if c.locked %} <span class="tag">已锁定</span>{% endif %}</h2>
+<fieldset style="border:0;padding:0;margin:0" {{ 'disabled' if c.locked }}>
+<div class="grid">
+<div><label>代理</label><select name="agent_id" id="agent" required><option value="">选择代理</option>{% for a in agents %}{% set s = agent_scheme(a) %}<option value="{{ a.id }}" data-y1="{{ s.y1 }}" data-y16="{{ s.y1_6 }}" data-y2="{{ s.y2 }}" data-y3="{{ s.y3 }}" {{ 'selected' if a.id==c.agent_id }}>{{ a.code or '' }} {{ a.name }}</option>{% endfor %}</select></div>
+<div><label>学期</label><input name="term" list="terms" value="{{ c.term }}" required><datalist id="terms">{% for t in terms %}<option>{{ t }}</option>{% endfor %}</datalist></div>
+<div><label>佣金规则</label><div class="small" id="rule" style="padding-top:6px">{{ scheme_label(c.agent) if c.agent else '' }}{% if c.agent and c.agent.level %}<br><span class="mute">本学年第一年学生已有 {{ c.ft1_ay }} 人{{ '，已按高档' if c.ft1_ay >= 6 else '，满 6 人自动升档并补差' }}</span>{% endif %}</div></div></div>
+<div class="tablewrap"><table style="margin-top:12px" id="stu"><tr><th>学生姓名</th><th>类别</th><th>课程</th><th>本地/国际</th><th>已缴学费</th><th>比例覆盖</th><th>备注</th><th class="r">佣金（预估）</th><th></th></tr>
+{% for s in (c.students or []) + [{}] %}<tr class="srow">
+<td><input name="s_name" value="{{ s.name or '' }}" style="min-width:130px"></td>
+<td><select name="s_program">{% for k, v in PROGRAMS.items() %}<option value="{{ k }}" {{ 'selected' if s.program==k }}>{{ v }}</option>{% endfor %}</select></td>
+<td><input name="s_courses" value="{{ s.courses or '' }}" style="min-width:110px"></td>
+<td><select name="s_origin">{% for o in ['International','Local'] %}<option {{ 'selected' if s.origin==o }}>{{ o }}</option>{% endfor %}</select></td>
+<td><input name="s_tuition" class="tu" value="{{ s.tuition if s.tuition is not none else '' }}" style="width:100px"></td>
+<td><input name="s_rate" class="ov" value="{{ s.rate if s.rate is not none else '' }}" placeholder="%" style="width:60px"></td>
+<td><input name="s_note" value="{{ s.note or '' }}"></td><td class="r amt"></td><td><button type="button" class="btn ghost del" title="删除">×</button></td></tr>{% endfor %}
+</table></div>
+<p><button type="button" class="btn ghost" id="add">+ 加一名学生</button></p>
+<div class="grid"><div><label>其它调整金额（如 -500 退费）</label><input name="other_amount" id="other" value="{{ c.other_amount if c.other_amount is not none else '' }}"></div>
+<div><label>调整说明</label><input name="other_note" value="{{ c.other_note or '' }}"></div><div><label>备注</label><input name="notes" value="{{ c.notes or '' }}"></div></div>
+<p><b>预估合计：<span id="total"></span></b> <span class="small mute">保存后以系统计算为准（含满 6 人补差）</span></p>
+<p><button class="btn">保存并计算</button> {% if c.id and not c.locked %}<button class="btn danger" name="delete" value="1" onclick="return confirm('删除这张结算单？')">删除</button>{% endif %}</p>
+</fieldset></form>
+
+{% if c.id and not c.locked %}<form method="post" enctype="multipart/form-data" action="{{ url_for('commission_import_roster', cid=c.id) }}" class="card inline"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div style="flex:3"><label>从 Student Roster Excel 导入学生（就是你现在用的 Commission Detail 表，按学期名找工作表）</label><input type="file" name="file" accept=".xlsx" required></div>
+<div><label>工作表名（可选）</label><input name="sheet" placeholder="{{ c.term }}"></div><div><button class="btn ghost">导入</button></div></form>{% endif %}
+
+{% if c.lines %}<div class="card"><h2>系统计算明细</h2><table><tr><th>项目</th><th>学生</th><th class="r">已缴学费</th><th class="r">比例</th><th class="r">佣金</th></tr>
+{% for l in c.lines %}<tr><td>{{ l.label }}</td><td>{{ l.student or '' }}</td><td class="r">{{ l.fee|money }}</td><td class="r">{{ ('%g%%'|format(l.rate)) if l.rate is not none else '' }}</td><td class="r">{{ l.amount|money }}</td></tr>{% endfor %}
+<tr><td colspan="4" class="r"><b>合计</b></td><td class="r"><b>{{ c.calc|money }}</b></td></tr></table>
+{% if c.imported and c.excel_commission is not none %}<p class="small mute">Excel 原记录：{{ c.excel_commission|money }}{% if c.mismatch %}，与系统计算不同，请核对{% endif %}。</p>{% endif %}</div>{% endif %}
+
+<script>
+const $=id=>document.getElementById(id), T=$('stu'), PRIOR={{ (c.ft1_ay or 0) - ((c.students or [])|selectattr('program','equalto','FT1')|list|length) }};
+function num(v){return Number(String(v||'').replace(/[,$]/g,''))||0}
+function calc(){const o=$('agent').selectedOptions[0]||{dataset:{}};const d=o.dataset;
+ const rows=[...T.querySelectorAll('.srow')];const n1=PRIOR+rows.filter(r=>r.querySelector('[name=s_program]').value==='FT1'&&r.querySelector('[name=s_name]').value.trim()).length;
+ const y1=n1>=6?num(d.y16):num(d.y1);const rate={FT1:y1,FT2:num(d.y2),FT3:num(d.y3),PT:15,AP:10};let t=0;
+ rows.forEach(r=>{const ov=r.querySelector('.ov').value;const p=ov!==''?num(ov):rate[r.querySelector('[name=s_program]').value];const a=num(r.querySelector('.tu').value)*p/100;t+=a;r.querySelector('.amt').textContent=a?'$'+a.toLocaleString(undefined,{maximumFractionDigits:2})+' ('+p+'%)':'';});
+ t+=num($('other').value);$('total').textContent='$'+t.toLocaleString(undefined,{maximumFractionDigits:2});}
+$('add').onclick=()=>{const r=T.querySelector('.srow:last-child').cloneNode(true);r.querySelectorAll('input').forEach(i=>i.value='');T.querySelector('tbody').appendChild(r);calc();};
+T.addEventListener('click',e=>{if(e.target.classList.contains('del')&&T.querySelectorAll('.srow').length>1){e.target.closest('tr').remove();calc();}});
+$('f').addEventListener('input',calc);$('f').addEventListener('change',calc);calc();
+</script>{% endblock %}

@@ -1,0 +1,42 @@
+# 代理管理系统：app（只在 Docker 内网）+ caddy（HTTPS，对学校内网开放 8443）
+name: agent-portal
+services:
+  app:
+    build: { context: ../.., dockerfile: deploy/server/Dockerfile }
+    image: agent-portal:latest
+    container_name: agent-portal
+    restart: unless-stopped
+    shm_size: "256m"                   # 合同排版预览的临时文件只放在内存里
+    environment:
+      AGENT_PORTAL_BACKUP_DIR: "/nas/01-代理管理系统-AgentPortal"
+      AGENT_SELF_SERVICE: "0"          # 代理自助页：先不上线
+      AI_LOCAL_LLM_URL: "${AI_LOCAL_LLM_URL:-}"   # install.sh 自动找到的 llama-server 地址
+      AI_LOCAL_LLM_KEY: "${AI_LOCAL_LLM_KEY:-}"
+      AI_LOCAL_MODEL: "${AI_LOCAL_MODEL:-}"
+      AI_SEARXNG_URL: "http://searxng:8080"
+    volumes:
+      - ${DATA_DIR:-/home/polo/agent-portal-data}:/data
+      - type: bind
+        source: /mnt/ja-nas
+        target: /nas
+        bind: { propagation: rslave }
+    extra_hosts: ["host.docker.internal:host-gateway"]   # 访问本机 llama-server / SearXNG
+  searxng:   # 开发新代理用的自建搜索，只在 Docker 内网，不对外
+    image: searxng/searxng:latest
+    container_name: agent-searxng
+    restart: unless-stopped
+    volumes:
+      - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_BASE_URL: "http://searxng:8080/"
+  caddy:
+    image: caddy:2
+    container_name: agent-portal-https
+    restart: unless-stopped
+    ports: ["8443:8443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [app]
+volumes:
+  caddy-data:

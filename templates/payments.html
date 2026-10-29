@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block body %}
+<div class="toolbar" style="flex-wrap:wrap"><h1 style="margin:0">年度付款汇总</h1><a class="tag" href="{{ url_for('performance') }}">业绩</a><span class="tag t-已发结算单">年度付款 / T4A</span><span style="flex:1"></span>
+<form class="toolbar" style="margin:0"><label style="margin:0">年份</label><select name="year" onchange="this.form.submit()">{% for y in years %}<option {{ 'selected' if y == year }}>{{ y }}</option>{% endfor %}</select></form>
+<a class="btn ghost" href="{{ url_for('payments_export', year=year) }}">导出 Excel（含 T4A 表）</a></div>
+<div class="row"><div class="card kpi"><div class="l">{{ year }} 年已付佣金</div><div class="n">{{ total|money or '$0' }}</div><div class="small mute">{{ summary|length }} 个代理 · 按付款日期统计</div></div>
+<div class="card kpi"><div class="l">需要开 T4A</div><div class="n">{{ t4a|length }}</div><div class="small mute">截止 {{ deadline }}{% if t4a|rejectattr('agent.tax_number')|list %} · {{ t4a|rejectattr('agent.tax_number')|list|length }} 个缺 SIN / BN{% endif %}</div></div></div>
+<div class="card"><p class="small" style="margin:0">T4A 规则：在加拿大的代理，个人或独资（没有注册公司）全年超过 $500 → 开 T4A，佣金填 <b>Box 020</b>（Self-employed commissions）。注册公司一般不需要；加拿大以外的代理不需要。代理的类型和 SIN / BN 在代理资料里填写（加密保存）。导出的 Excel 里「T4A」那一页可以直接交给会计在 CRA 网上申报。{% if not cfg.payer_bn %}<a href="{{ url_for('settings_page') }}">在设置里填学校的 BN</a>，会显示在 T4A 表头。{% endif %}</p></div>
+<form method="post" action="{{ url_for('payments_send', year=year) }}" class="card" style="padding:0"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<table><tr><th></th><th>代理</th><th>国家</th><th>类型</th><th class="r">付款次数</th><th class="r">全年合计</th><th>T4A</th><th>SIN / BN</th></tr>
+{% for s in summary %}{% set a = s.agent %}<tr><td><input type="checkbox" class="chk" name="aid" value="{{ a.id }}"></td>
+<td><a href="{{ url_for('agent_detail', aid=a.id) }}">{{ a.name }}</a> <span class="small mute">{{ a.code }}</span><div class="small mute">{{ a.payee or '' }}</div></td>
+<td class="small">{{ a.country }}</td><td class="small">{{ ENTITY_TYPES[s.entity] }}{% if not a.entity_type %} <span class="mute">(按名称判断)</span>{% endif %}</td>
+<td class="r">{{ s.payments|length }}</td><td class="r"><b>{{ s.total|money }}</b></td>
+<td class="small"><span class="tag {{ 't-warn' if s.t4a else '' }}">{{ s.t4a_note }}</span></td>
+<td class="small mono">{% if s.t4a %}{{ '已填' if a.tax_number else '' }}{% if not a.tax_number %}<a href="{{ url_for('agent_edit', aid=a.id) }}">补填</a>{% endif %}{% endif %}</td></tr>
+{% else %}<tr><td colspan="8" class="mute">{{ year }} 年还没有已付的佣金</td></tr>{% endfor %}</table>
+{% if summary %}<p style="padding:0 16px"><button class="btn ghost" onclick="return confirm('给勾选的代理（不勾选则全部）发 {{ year }} 年度付款明细？')">给代理发年度付款明细</button> <span class="small mute">每个代理收到自己的付款清单 Excel；需要 T4A 的会注明。</span></p>{% endif %}</form>{% endblock %}

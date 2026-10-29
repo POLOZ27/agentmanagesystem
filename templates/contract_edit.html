@@ -1,0 +1,41 @@
+{% extends "base.html" %}{% block body %}
+{% macro runs(b) %}{% for r in b.runs %}<span style="{{ 'font-weight:bold;' if r.b }}{{ 'font-style:italic;' if r.i }}{{ 'text-decoration:underline;' if r.u }}{{ 'font-size:%.1fpx;'|format(r.size * 1.333) if r.size }}">{{ r.t }}</span>{% else %}{{ b.text }}{% endfor %}{% endmacro %}
+{% macro blocks(bs) %}{% for b in bs %}{% if b.kind == 'p' %}<div class="dp{{ ' c' if b.center }}{{ ' r' if b.right }}{{ ' h' if b.head }}{{ ' li' if b.list }}{{ ' ro' if not b.editable }}" style="{{ 'margin-left:%dpx;'|format(b.indent * 1.333) if b.indent > 0 }}" {% if b.editable %}contenteditable="true" data-i="{{ b.i }}"{% else %}title="这一段含链接，请下载 Word 修改"{% endif %}>{{ runs(b) }}</div>{% else %}<table class="dt">{% for row in b.rows %}<tr>{% for cell in row %}<td colspan="{{ cell.span }}">{{ blocks(cell.blocks) }}</td>{% endfor %}</tr>{% endfor %}</table>{% endif %}{% endfor %}{% endmacro %}
+<div class="toolbar" style="flex-wrap:wrap"><h1 style="margin:0">合同预览 / 编辑</h1><span style="flex:1"></span>
+<span class="seg"><a href="?mode=view&back={{ back|urlencode }}" class="{{ 'on' if mode != 'edit' }}">排版预览</a><a href="?mode=edit&back={{ back|urlencode }}" class="{{ 'on' if mode == 'edit' }}">修改文字</a></span>
+<a class="btn ghost small" href="{{ url_for('contract_download', aid=a.id, i=i) }}">下载 Word</a>
+{% if mode == 'edit' %}<button class="btn small" form="save" id="savebtn">保存修改</button>{% endif %}</div>
+<div class="card small" style="margin-bottom:12px">{{ a.name }} {{ a.code or '' }} · 📄 {{ c.name }}{% if c.edited %} · 最后在线修改 {{ c.edited }}{% endif %}
+{% if is_renewal %}{% set lv = LEVELS[a.renewal.level] %}<div style="margin-top:6px"><span class="tag lv-{{ a.renewal.level }}">续签等级：{{ '高级 Premier' if a.renewal.level == 'premier' else '标准级 Standard' }} · 第一年 {{ lv.y1 }}% / 满 6 人 {{ lv.y1_6 }}% · 第二年 {{ lv.y2 }}% · 第三年 {{ lv.y3 }}%</span> 合同期 {{ a.renewal.start }} → {{ a.renewal.end }}</div>{% endif %}
+<div class="mute" style="margin-top:6px">{% if mode == 'edit' %}点任意文字直接修改，改完点右上角「保存修改」，会自动回到排版预览。黄色底色是这次改过、还没保存的地方。只替换您改动的那几个字，原来的字体、粗体、下划线、编号和表格都保持不变。{% else %}这是合同真正的排版，和代理收到的 Word 文件一样。要改内容，点右上角「修改文字」。{% endif %} 注意：在续签页点「重新生成」会按模板重做一份，在线修改会丢掉。</div></div>
+{% if mode == 'edit' %}
+<div class="docpage">{{ blocks(doc) }}</div>
+<form method="post" id="save"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="edits" id="edits"><input type="hidden" name="back" value="{{ back }}"></form>
+{% elif pages %}
+<div class="pages">{% for n in range(pages) %}<img src="{{ url_for('contract_page', aid=a.id, i=i, n=n, v=(c.fid or '')[:8]) }}" alt="第 {{ n + 1 }} 页" loading="lazy">{% endfor %}</div>
+{% else %}
+<div class="card">服务器上还没装排版预览组件（LibreOffice），请先「下载 Word」查看，或点「修改文字」。</div>
+{% endif %}
+<style>
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}.seg a{padding:6px 12px;font-size:13px;color:var(--ink)}.seg a.on{background:var(--brand);color:var(--btnink)}
+.pages{display:flex;flex-direction:column;align-items:center;gap:16px}.pages img{width:100%;max-width:850px;background:#fff;border:1px solid var(--line);box-shadow:0 2px 12px rgba(0,0,0,.1)}
+.docpage{background:#fff;color:#111;max-width:850px;margin:0 auto;padding:56px 64px;border:1px solid var(--line);border-radius:4px;box-shadow:0 2px 12px rgba(0,0,0,.08);font:16px/1.45 "Times New Roman","Liberation Serif",Georgia,serif}
+.dp{min-height:1.3em;white-space:pre-wrap;padding:1px 3px;border-radius:3px;outline:none}
+.dp[contenteditable]:hover{background:#f3f6ff}.dp:focus{background:#eef3ff;box-shadow:0 0 0 1px #9db4ff}.dp.ro{color:#333}
+.dp.c{text-align:center}.dp.r{text-align:right}.dp.h{font-size:20px;font-weight:bold}.dp.li{padding-left:24px;position:relative}.dp.li:before{content:"•";position:absolute;left:8px}
+.dp.changed{background:#fff6c9}
+.dt{width:100%;border-collapse:collapse;margin:6px 0}.dt td{border:1px solid #bbb;padding:3px 6px;vertical-align:top}
+@media (max-width:700px){.docpage{padding:20px 16px}}
+</style>
+{% if mode == 'edit' %}<script>
+const orig = {}, ps = document.querySelectorAll('.dp[data-i]');
+ps.forEach(p => { orig[p.dataset.i] = p.innerText;
+  p.addEventListener('paste', ev => { ev.preventDefault(); document.execCommand('insertText', false, (ev.clipboardData || window.clipboardData).getData('text/plain')); });
+  p.addEventListener('input', () => p.classList.toggle('changed', p.innerText !== orig[p.dataset.i])); });
+let dirty = () => [...ps].some(p => p.innerText !== orig[p.dataset.i]);
+document.getElementById('save').addEventListener('submit', () => {
+  const e = {}; ps.forEach(p => { if (p.innerText !== orig[p.dataset.i]) e[p.dataset.i] = p.innerText.replace(/\n$/, ''); });
+  document.getElementById('edits').value = JSON.stringify(e); window.onbeforeunload = null;
+});
+window.onbeforeunload = () => dirty() ? '还有没保存的修改' : undefined;
+</script>{% endif %}{% endblock %}

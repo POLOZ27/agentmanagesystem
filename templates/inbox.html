@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block title %}加密收件箱{% endblock %}{% block body %}<h1>加密收件箱</h1>
+<p class="small mute">别人（例如 Claude）可以把资料用本系统的公钥加密后放到服务器上，只有您解锁后才能打开。<b>收件箱不会自动导入</b>：请先核对下面的内容，特别是收款方式，确认无误再导入。来历不明的包请直接删除。</p>
+{% if not bundles %}<div class="card"><p>收件箱是空的。</p></div>{% endif %}
+{% for b in bundles %}<div class="card"><b>{{ b.name }}</b> · {{ b.parts }} 份{% if not b.complete %} · <span class="mute">传输中（已到 {{ b.have }}/{{ b.parts }}），传完后刷新</span>{% elif b.name != sel %} · <a href="{{ url_for('inbox_page', b=b.name) }}">预览</a>{% endif %}</div>{% endfor %}
+{% if err %}<div class="flash">打不开这个包：{{ err }}</div>
+<form method="post" action="{{ url_for('inbox_delete', name=sel) }}"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn ghost">删除这个包</button></form>{% endif %}
+{% if pv %}<div class="card"><h2>{{ sel }} 的内容</h2>
+<p>代理 <b>{{ pv.agents|length }}</b> 个 · 历史佣金 <b>{{ pv.rows }}</b> 条（{{ pv.terms|first }} 到 {{ pv.terms|last }}，共 {{ pv.terms|length }} 个学期）· 已签合同 <b>{{ pv.contracts|length }}</b> 份（{{ pv.matched }} 份能按编号归到代理）{% if pv.tracker_n %} · 潜在代理名单约 <b>{{ pv.tracker_n }}</b> 行{% endif %}</p>
+{% if pv.agents|selectattr('pay_changed')|list %}<div class="flash">⚠️ 有代理的收款信息和系统里现有的不一样（下表标红），请逐个核对后再导入。</div>{% endif %}
+<table><tr><th>编号</th><th>代理</th><th>比例</th><th>E-transfer / 收款邮箱</th><th>支票抬头</th><th>银行 / 备注</th></tr>
+{% for a in pv.agents %}<tr{% if a.pay_changed %} style="background:#fde8e8"{% endif %}><td>{{ a.code or '—' }}</td><td>{{ a.name }}{% if a.exists %} <span class="tag">已存在</span>{% endif %}</td><td class="small">{{ a.scheme_text }}</td><td class="small">{{ a.etransfer or '' }}</td><td class="small">{{ a.payee or '' }}</td><td class="small">{{ a.detail or '' }}</td></tr>{% endfor %}</table>
+<details><summary>合同文件（{{ pv.contracts|length }}）</summary><table>{% for n, code, exp, p in pv.contracts %}<tr><td class="small">{{ n }}</td><td>{{ code or '无编号，不导入' }}</td><td>{{ exp or '' }}</td></tr>{% endfor %}</table></details>
+<form method="post" action="{{ url_for('inbox_import', name=sel) }}" onsubmit="this.querySelector('button').textContent='正在导入，请稍等…'"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<p class="small"><label style="display:inline"><input type="checkbox" name="confirm" value="1"> 我确认要再次导入（系统里已有代理时才需要）</label></p>
+<p><button class="btn">核对无误，导入</button></p></form>
+<form method="post" action="{{ url_for('inbox_delete', name=sel) }}" onsubmit="return confirm('删除这个包？不会导入任何内容。')"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn ghost">不导入，删除这个包</button></form></div>{% endif %}
+{% endblock %}

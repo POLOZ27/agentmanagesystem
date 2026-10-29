@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block body %}
+<div class="toolbar" style="flex-wrap:wrap"><h1 style="margin:0">{{ p.agency }}</h1><span class="tier tier-{{ p.tier }}">{{ p.tier or '–' }}</span><span class="tag t-{{ p.stage or '未联系' }}">{{ p.stage or '未联系' }}</span>{% if p.unsubscribed %}<span class="tag t-bad">已退订</span>{% endif %}<span style="flex:1"></span>
+{% if p.email and not p.unsubscribed %}<a class="btn ghost" href="{{ url_for('outreach', ids=p.id, kind='followup' if p.emails_sent else '') }}">{{ '发跟进邮件' if p.emails_sent else '发开发邮件' }}</a>{% endif %}
+{% if p.agent_id %}<a class="btn" href="{{ url_for('agent_detail', aid=p.agent_id) }}">查看代理</a>{% elif p.stage != '不合适' %}<form method="post" action="{{ url_for('prospect_convert', pid=p.id) }}" onsubmit="return confirm('谈成了？转为代理后从入驻第 3 步继续。')"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn">谈成了，转为代理</button></form>{% endif %}</div>
+<div class="row"><form method="post" class="card" style="flex:2"><input type="hidden" name="_csrf" value="{{ csrf }}"><div class="grid">
+{% for k, l in [('agency','机构'),('country','国家'),('city','城市'),('contact','联系人'),('role','职位'),('email','邮箱'),('phone','电话'),('whatsapp','WhatsApp'),('website','网站')] %}<div><label>{{ l }}</label><input name="{{ k }}" value="{{ p[k] or '' }}"></div>{% endfor %}
+<div><label>规模等级</label><select name="tier">{% for t in ['', 'A', 'B', 'C'] %}<option {{ 'selected' if t==(p.tier or '') }}>{{ t }}</option>{% endfor %}</select></div>
+<div><label>阶段</label><select name="stage">{% for s in PROSPECT_STAGES %}<option {{ 'selected' if s==(p.stage or '未联系') }}>{{ s }}</option>{% endfor %}</select></div></div>
+<label>备注</label><textarea name="notes" style="min-height:80px">{{ p.notes or '' }}</textarea><p><button class="btn">保存</button></p></form>
+<div class="card"><h2>情况</h2><table>
+<tr><td class="mute">邮件语言</td><td>English{% if lang %} + {{ (LANG_LABELS).get(lang, lang) }}{% endif %}</td></tr>
+<tr><td class="mute">来源</td><td class="small">{{ p.source or '' }}{% if p.source_url %} · <a href="{{ p.source_url }}" target="_blank" rel="noopener">来源链接</a>{% endif %}</td></tr>
+{% if p.size_evidence %}<tr><td class="mute">规模依据</td><td class="small">{{ p.size_evidence }}</td></tr>{% endif %}{% if p.ai_checked %}<tr><td class="mute">AI 判断</td><td class="small">{{ p.ai_checked }}</td></tr>{% endif %}
+{% if p.k12_fit %}<tr><td class="mute">高中适合度</td><td class="small">{{ p.k12_fit }}</td></tr>{% endif %}
+{% if p.canada_focus %}<tr><td class="mute">加拿大业务</td><td class="small">{{ p.canada_focus }}</td></tr>{% endif %}
+<tr><td class="mute">已发邮件</td><td>{{ p.emails_sent or 0 }} 封{% if p.last_email_on %} · 上次 {{ p.last_email_on }}{% endif %}</td></tr></table></div></div>
+<div class="card"><h2>往来邮件</h2><table>{% for m in mails %}<tr><td>{{ '↙ 收' if m.direction=='in' else '↗ 发' }}</td><td><a href="{{ url_for('mail_msg', mid=m.id) }}">{{ m.subject }}</a></td><td class="small mute">{{ m.at[:16]|replace('T',' ') }}</td></tr>{% else %}<tr><td class="mute">暂无</td></tr>{% endfor %}</table></div>{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "portal/base.html" %}{% block body %}
+{% set EN = {'收到申请':'Application received','资料齐全':'Documents complete','已发录取信':'Offer issued','已缴学费':'Tuition paid','学签获批':'Study permit approved','已入学':'Enrolled','未入学':'Not enrolled',
+ '已发结算单':'Statement sent – please confirm','代理已确认':'Confirmed – processing','已交会计':'Payment in progress','已付':'Paid'} %}
+<div class="toolbar" style="flex-wrap:wrap"><h1 style="margin:0">{{ a.name }}</h1><span class="mono mute">Agent No. {{ a.code }}</span></div>
+<div class="row"><div class="card kpi"><div class="l">Students in progress</div><div class="n">{{ students|rejectattr('stage','in',['已入学','未入学'])|list|length }}</div><div class="small mute">{{ students|selectattr('stage','equalto','已入学')|list|length }} enrolled</div></div>
+<div class="card kpi"><div class="l">Commission awaiting your confirmation</div><div class="n">{{ comms|selectattr('stage','equalto','已发结算单')|map(attribute='amount')|sum|money or '$0' }}</div></div>
+<div class="card kpi"><div class="l">Agreement valid until</div><div class="n" style="font-size:20px">{{ a.contract_expiry or '—' }}</div>{% if days_left is not none and days_left <= 120 %}<div class="small" style="color:var(--warn)">{{ 'Expired' if days_left < 0 else 'Renewal coming up – we will contact you' }}</div>{% endif %}</div></div>
+
+<div class="card" style="padding:0"><h2 style="padding:14px 16px 0">Commission statements</h2><table><tr><th>Term</th><th class="r">Amount</th><th>Status</th><th></th></tr>
+{% for c in comms %}<tr><td>{{ c.term }}</td><td class="r"><b>{{ c.amount|money }}</b></td><td><span class="tag t-{{ c.stage }}">{{ EN.get(c.stage, c.stage) }}</span>{% if c.paid_on %}<div class="small mute">Paid {{ c.paid_on }}</div>{% endif %}</td>
+<td class="small"><a href="{{ url_for('portal_statement', cid=c.id) if not preview else '#' }}">Download statement</a>
+{% if c.stage == '已发结算单' and not preview %}<form method="post" enctype="multipart/form-data" action="{{ url_for('portal_confirm', cid=c.id) }}" class="inline" style="margin-top:6px"><input type="hidden" name="_csrf" value="{{ csrf }}"><div><input type="file" name="invoice" required></div><div style="flex:none"><button class="btn small">Confirm &amp; upload invoice</button></div></form>{% endif %}</td></tr>
+{% else %}<tr><td class="mute" colspan="4">No statements yet</td></tr>{% endfor %}</table></div>
+
+<div class="card" style="padding:0"><h2 style="padding:14px 16px 0">Student applications</h2><table><tr><th>Student</th><th>Program</th><th>Intake</th><th>Status</th></tr>
+{% set KEN = {'资料包':'Partner kit','宣传册':'Brochure','传单':'Flyer','PPT':'Presentation','申请表':'Application form','文字介绍':'School profile','校历':'Calendar','视频':'Video','照片':'Photos','Logo':'Logo','其它':'Other'} %}
+{% set LEN = {'中文':'Chinese','英文':'English','中英':'Chinese / English'} %}
+{% set PEN = {'FT1':'Full-time (year 1)','FT2':'Full-time (year 2)','FT3':'Full-time (year 3)','PT':'Part-time / single course','AP':'AP course'} %}
+{% for s in students %}<tr><td>{{ s.name }}</td><td class="small">{{ PEN.get(s.program, s.program) }}</td><td class="small">{{ s.intake }}</td><td><span class="tag {{ 't-活跃' if s.stage=='已入学' else ('t-bad' if s.stage=='未入学' else 't-已发结算单') }}">{{ EN.get(s.stage, s.stage) }}</span><div class="small mute">{{ (s.history or {}).get(s.stage, '') }}</div></td></tr>
+{% else %}<tr><td class="mute" colspan="4">No applications yet</td></tr>{% endfor %}</table></div>
+
+<div class="card"><h2>Marketing materials</h2><table>{% for x in kit %}<tr><td><a href="{{ x.url }}" target="_blank" rel="noopener">{{ x.title }}</a></td><td class="small mute">{{ KEN.get(x.kind, x.kind) }}{{ ' · ' ~ LEN.get(x.lang, x.lang) if x.lang }}</td></tr>{% else %}<tr><td class="mute">Coming soon</td></tr>{% endfor %}</table>
+<p class="small mute">Questions? Email <a href="mailto:polozhang@cseec.ca">polozhang@cseec.ca</a> · <a href="https://calendly.com/polozhang-cseec/30min" target="_blank" rel="noopener">book a 30-minute call</a></p></div>{% endblock %}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block body %}
+<div class="toolbar" style="flex-wrap:wrap"><h1 style="margin:0">代理业绩</h1><span class="tag t-已发结算单">业绩</span><a class="tag" href="{{ url_for('payments') }}">年度付款 / T4A</a><span style="flex:1"></span>
+<form class="toolbar" style="margin:0"><label style="margin:0">学年</label><select name="ay" onchange="this.form.submit()">{% for y in ays %}<option {{ 'selected' if y == ay }}>{{ y }}</option>{% endfor %}</select></form></div>
+<div class="row"><div class="card kpi"><div class="l">{{ ay }} 学年有学生的代理</div><div class="n">{{ active|length }}</div><div class="small mute">共 {{ rows|length }} 个已签约代理</div></div>
+<div class="card kpi"><div class="l">代理带来的学费</div><div class="n">{{ fees|money or '$0' }}</div></div>
+<div class="card kpi"><div class="l">佣金合计</div><div class="n">{{ total|money or '$0' }}</div><div class="small mute">佣金 / 学费 {{ '%.1f'|format(total / fees * 100) if fees else 0 }}%</div></div>
+<div class="card kpi"><div class="l">一年以上没有学生的活跃代理</div><div class="n">{{ idle|length }}</div><div class="small mute">可以考虑跟进或改为不活跃</div></div></div>
+<div class="card" style="padding:0"><table><tr><th>#</th><th>代理</th><th class="r">学生</th><th class="r">第一年</th><th class="r">学费</th><th class="r">佣金</th><th>对比 {{ prev }}</th><th class="r">申请 → 入学</th><th>最近学期</th></tr>
+{% set mx = (rows|map(attribute='commission')|max if rows else 1) or 1 %}
+{% for r in rows %}<tr><td class="small mute">{{ loop.index }}</td><td><a href="{{ url_for('agent_detail', aid=r.a.id) }}">{{ r.a.name }}</a> <span class="small mute">{{ r.a.country or '' }}</span>{% if r.idle and r.a.status == '活跃' %} <span class="tag t-warn">一年无学生</span>{% endif %}
+<div class="bar" style="margin:2px 0 0"><span class="b" style="width:{{ (r.commission / mx * 100)|round }}%;height:6px"></span></div></td>
+<td class="r">{{ r.students }}</td><td class="r">{{ r.ft1 }}{% if r.ft1 >= 6 %} <span class="tag t-活跃">6+</span>{% endif %}</td><td class="r">{{ r.fees|money }}</td><td class="r"><b>{{ r.commission|money }}</b></td>
+<td class="small">{% if r.prev or r.commission %}{% set diff = r.commission - r.prev %}<span style="color:{{ 'var(--ok)' if diff >= 0 else 'var(--bad)' }}">{{ '+' if diff >= 0 }}{{ diff|money if diff >= 0 else '-' ~ (-diff)|money }}</span>{% endif %}</td>
+<td class="r small">{% if r.apps %}{{ r.apps }} → {{ r.enrolled }}{% else %}<span class="mute">—</span>{% endif %}</td><td class="small mute">{{ r.last_term }}</td></tr>{% endfor %}</table></div>
+<p class="small mute">学生数和学费来自结算单（按学期所属学年，暑期算入刚结束的学年）；「申请 → 入学」来自学生申请进度。从 Excel 导入的旧记录只有汇总金额，没有学生人数。</p>{% endblock %}

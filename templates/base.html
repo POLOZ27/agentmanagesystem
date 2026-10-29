@@ -1,0 +1,23 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}代理管理{% endblock %} · Agent Portal</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head><body>
+{% if session.ok %}<div class="top"><b>Johnathan Academy · 代理管理</b><nav>
+{% set ep = request.endpoint or '' %}
+<a href="{{ url_for('dashboard') }}" class="{{ 'on' if ep=='dashboard' }}">总览</a>
+<a href="{{ url_for('agents_list') }}" class="{{ 'on' if ep.startswith('agent') or ep=='renewals' }}">代理</a>
+<a href="{{ url_for('students') }}" class="{{ 'on' if ep.startswith('student') }}">学生申请</a>
+<a href="{{ url_for('prospects') }}" class="{{ 'on' if ep.startswith('prospect') or ep=='outreach' }}">开发新代理</a>
+<a href="{{ url_for('commissions') }}" class="{{ 'on' if ep.startswith('commission') }}">佣金结算</a>
+<a href="{{ url_for('mail') }}" class="{{ 'on' if (ep.startswith('mail') and ep != 'materials') or ep=='compose' }}">邮件 / News</a>
+<a href="{{ url_for('materials') }}" class="{{ 'on' if ep=='materials' }}">资料库</a>
+<a href="{{ url_for('performance') }}" class="{{ 'on' if ep in ('performance', 'payments') }}">报表</a>
+<a href="{{ url_for('settings_page') }}" class="{{ 'on' if ep=='settings_page' }}">设置与安全</a></nav>
+<span class="lock-note">🔒 已解锁 · 数据加密存储</span>
+<form method="post" action="{{ url_for('lock') }}"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="lockbtn">锁定</button></form></div>{% endif %}
+<main>{% if parent_url %}<a class="backlink" id="backlink" href="{{ parent_url }}">← 返回</a>
+<script>(function(){let s=[];try{s=JSON.parse(sessionStorage.getItem('nav')||'[]')}catch(e){}
+const here=location.pathname+location.search,nav=(performance.getEntriesByType('navigation')[0]||{}),i=s.lastIndexOf(here);
+if(i>=0)s=s.slice(0,i+1);else if(nav.redirectCount>0&&s.length)s[s.length-1]=here;else s.push(here);
+s=s.slice(-30);try{sessionStorage.setItem('nav',JSON.stringify(s))}catch(e){}
+if(s.length>1)document.getElementById('backlink').href=s[s.length-2];})();</script>
+{% else %}<script>try{sessionStorage.setItem('nav',JSON.stringify([location.pathname+location.search]))}catch(e){}</script>{% endif %}
+{% if inbox_n and request.endpoint != 'inbox_page' %}<div class="flash">📥 加密收件箱里有 {{ inbox_n }} 个待确认的资料包，<a href="{{ url_for('inbox_page') }}">去预览并确认导入</a></div>{% endif %}{% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}{% block body %}{% endblock %}</main></body></html>

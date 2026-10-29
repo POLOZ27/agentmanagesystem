@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block body %}
+<div class="toolbar"><h1 style="margin:0">{{ st.name or '新的学生申请' }}</h1>{% if st.stage %}<span class="tag">{{ st.stage }}</span>{% endif %}<span style="flex:1"></span><a class="btn ghost" href="{{ url_for('students') }}">返回列表</a></div>
+{% if st.id %}<div class="card"><ol class="flow">{% for g in STUDENT_STAGES[:-1] %}<li class="{{ 'done' if g in (st.history or {}) else ('cur' if g == st.stage else '') }}"><b>{{ g }}</b>{{ (st.history or {}).get(g) or STUDENT_HINTS[g] }}</li>{% endfor %}</ol>
+{% if st.stage == '已入学' %}{% if st.commission_id %}<p class="small">已加入 <a href="{{ url_for('commission_edit', cid=st.commission_id) }}">{{ st.intake }} 结算单</a>。</p>
+{% else %}<form method="post" action="{{ url_for('student_to_statement', sid=st.id) }}"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn">加入 {{ agent.name if agent else '代理' }} 的 {{ st.intake }} 结算单</button> <span class="small mute">按代理合同自动算佣金</span></form>{% endif %}{% endif %}</div>{% endif %}
+<form method="post" enctype="multipart/form-data" class="card"><input type="hidden" name="_csrf" value="{{ csrf }}"><div class="grid">
+<div><label>学生姓名 *</label><input name="name" value="{{ st.name or '' }}" required></div>
+<div><label>代理</label><select name="agent_id"><option value="">直接申请（无代理）</option>{% for a in agents %}<option value="{{ a.id }}" {{ 'selected' if a.id == st.agent_id }}>{{ a.name }} {{ a.code or '' }}</option>{% endfor %}</select></div>
+<div><label>项目</label><select name="program">{% for k, v in PROGRAMS.items() %}<option value="{{ k }}" {{ 'selected' if st.program == k }}>{{ v }}</option>{% endfor %}</select></div>
+<div><label>年级</label><input name="grade" value="{{ st.grade or '' }}" placeholder="8–12"></div>
+<div><label>入学学期（和结算单学期一致）</label><input name="intake" list="terms" value="{{ st.intake or '' }}"><datalist id="terms">{% for t in terms %}<option>{{ t }}</option>{% endfor %}</datalist></div>
+<div><label>国籍 / 地区</label><input name="country" value="{{ st.country or '' }}"></div>
+<div><label>本地 / 国际</label><select name="origin">{% for o in ['International', 'Local'] %}<option {{ 'selected' if st.origin == o }}>{{ o }}</option>{% endfor %}</select></div>
+<div><label>课程</label><input name="courses" value="{{ st.courses or '' }}" placeholder="Full-time 或具体课程"></div>
+<div><label>学费（入结算单用）</label><input name="tuition" value="{{ st.tuition or '' }}"></div>
+<div><label>进度</label><select name="stage">{% for g in STUDENT_STAGES %}<option {{ 'selected' if g == (st.stage or '收到申请') }}>{{ g }}</option>{% endfor %}</select></div>
+<div><label>进度日期</label><input type="date" name="stage_date"></div></div>
+<label>备注</label><input name="notes" value="{{ st.notes or '' }}">
+<label>上传材料（申请表、护照、成绩单等，加密保存）</label><input type="file" name="doc">
+{% if st.docs %}<p class="small">{% for d in st.docs %}<a href="{{ url_for('file_download', fid=d.fid, name=d.name) }}">📄 {{ d.name }}</a>{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}
+<p><button class="btn">保存</button>{% if st.id %} <button class="btn danger" name="delete" value="1" onclick="return confirm('删除这个学生申请？')">删除</button>{% endif %}</p></form>{% endblock %}

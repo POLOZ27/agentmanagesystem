@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block body %}<div class="center card"><h1>首次设置</h1>
+<p class="mute small">主密码只由你本人保存，系统不会存储它。忘记主密码只能用恢复密钥找回，技术人员也无法帮你重置。</p>
+<form method="post"><label>主密码（至少 12 位）</label><input type="password" name="password" required minlength="12">
+<label>再输入一次</label><input type="password" name="password2" required>
+<label>两步验证：在手机验证器（Google Authenticator / Microsoft Authenticator）里添加以下密钥</label>
+<div class="mono card" style="margin:0">{{ secret }}</div><div class="small mute mono">{{ uri }}</div>
+<input type="hidden" name="totp_secret" value="{{ secret }}"><label>验证器显示的 6 位数</label><input name="code" required inputmode="numeric">
+<p><button class="btn">创建加密保险库</button></p></form></div>{% endblock %}

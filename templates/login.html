@@ -1,0 +1,6 @@
+{% extends "base.html" %}{% block body %}<div class="center card"><h1>🔒 代理管理系统</h1>
+<p class="mute small">{% if unlocked %}请登录。{% else %}保险库已锁定：输入主密码解锁数据。{% endif %}</p>
+<form method="post"><label>主密码</label><input type="password" name="password" required autofocus>
+{% if trusted %}<p class="small mute">✓ 这台设备已记住，不用输验证码。</p>{% else %}<label>验证器 6 位数</label><input name="code" required inputmode="numeric" autocomplete="one-time-code">
+<label class="small" style="display:flex;gap:6px;align-items:center;font-weight:normal"><input type="checkbox" name="remember" value="1" checked style="width:auto"> 记住这台设备，{{ trust_days }} 天内不再要验证码（公用电脑请不要勾）</label>{% endif %}
+<p><button class="btn">登录</button></p></form></div>{% endblock %}

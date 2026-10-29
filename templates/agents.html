@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block body %}<h1>代理列表 <span class="mute small">{{ agents|length }} 个</span></h1>
+<form class="toolbar"><input name="q" value="{{ q }}" placeholder="搜索名称、编号、邮箱、国家…" style="width:280px">
+<select name="status"><option value="">全部状态</option>{% for s in STATUSES %}<option {{ 'selected' if s==st }}>{{ s }}</option>{% endfor %}</select>
+<button class="btn ghost">筛选</button><span style="flex:1"></span><a class="btn ghost" href="{{ url_for('renewals') }}">合同续签</a><a class="btn" href="{{ url_for('agent_new') }}">+ 新代理入驻</a></form>
+<div class="card" style="padding:0"><table><tr><th>编号</th><th>代理名称</th><th>状态</th><th>佣金方案</th><th>邮箱</th><th>合同到期</th><th class="r">累计佣金</th></tr>
+{% for a in agents %}{% set d = days_left(a.contract_expiry) %}<tr>
+<td class="mono small">{{ a.code or '—' }}</td><td><a href="{{ url_for('agent_detail', aid=a.id) }}">{{ a.name }}</a>{% if a.country %} <span class="small mute">· {{ a.country }}</span>{% endif %}</td>
+<td><span class="tag t-{{ a.status }}">{{ a.status }}</span>{% if a.status in ['潜在','洽谈中','已签约'] %}{% set n = onboarding_step(a) %}<div class="small mute">第 {{ [n+1,7]|min }}/7 步</div>{% endif %}</td>
+<td class="small">{% if a.level %}<span class="tag">{{ '高级' if a.level=='premier' else '标准级' }}</span>{% else %}{{ scheme_label(a) if a.rates else (a.scheme_text or '未设置') }}{% endif %}</td><td class="small">{{ a.email }}</td>
+<td class="small">{% if a.contract_expiry %}{{ a.contract_expiry[:7] }} {% if d < 0 %}<span class="tag t-bad">过期</span>{% elif d < 120 %}<span class="tag t-warn">将到期</span>{% endif %}{% else %}<span class="mute">—</span>{% endif %}</td>
+<td class="r">{{ earned.get(a.id, 0)|money }}</td></tr>{% endfor %}</table></div>{% endblock %}
