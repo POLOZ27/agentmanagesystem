@@ -1369,13 +1369,15 @@ def students_sync():
 def student_assign(sid):
     st = vault.get("student", sid) or abort(404)
     aid = request.form.get("agent_id", "")
+    if aid == "self":
+        aid = ""
     if aid and not vault.get("agent", aid):
         abort(400)
     st.update(agent_id=aid, agent_manual=True, agent_auto="")
     if not aid:
-        st["uses_agent"] = False  # 选「直接申请」= 确认没有代理，不再出现在待分配里
+        st["uses_agent"] = False  # 选「学生自己申请」= 确认没有代理，不再出现在待分配里
     vault.put("student", st)
-    flash(f"{st.get('name', '')}：已分配给 {vault.get('agent', aid)['name']}" if aid else f"{st.get('name', '')}：标为直接申请")
+    flash(f"{st.get('name', '')}：已分配给 {vault.get('agent', aid)['name']}" if aid else f"{st.get('name', '')}：标为学生自己申请")
     back = request.form.get("back") or ""
     return redirect(back if back.startswith("/") and not back.startswith("//") else url_for("students"))
 

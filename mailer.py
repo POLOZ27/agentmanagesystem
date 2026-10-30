@@ -28,6 +28,9 @@ from vault import Locked
 GRAPH = "https://graph.microsoft.com/v1.0"
 M365_SCOPE = "offline_access User.Read Mail.Send Mail.Read"  # 只读邮件 + 发信，不能改动或删除邮箱里的邮件
 _token = {}  # 内存里的访问令牌，不落盘
+# 学校在 Entra 注册的应用「Johnathan Agent Portal」（公开客户端，没有密钥；ID 不是机密）
+M365_DEFAULT = {"m365_tenant": "a347e33f-ec5c-464d-8660-16d61c1e8080",
+                "m365_client_id": "3535cff3-c2b5-49c4-b4a9-9fc832436ffd"}
 
 
 def _login_url(cfg, path):
@@ -95,6 +98,9 @@ def mail_on(cfg):
 
 def settings(vault):
     s = vault.get("settings", "mail") or {"id": "mail"}
+    for key, val in M365_DEFAULT.items():
+        if not s.get(key) or (key == "m365_tenant" and s[key] == "cseec.ca"):
+            s[key] = val
     # 服务器部署时由 install.sh 自动找到的本地模型 / 搜索地址，设置页没填时用它们
     for key, env in (("local_llm_url", "AI_LOCAL_LLM_URL"), ("local_api_key", "AI_LOCAL_LLM_KEY"),
                      ("local_model", "AI_LOCAL_MODEL"), ("searxng_url", "AI_SEARXNG_URL")):

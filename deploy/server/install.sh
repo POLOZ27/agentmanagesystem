@@ -2,7 +2,7 @@
 # 在服务器上运行（polo 在 docker 组，不需要 sudo）：bash ~/agent-portal/deploy/server/install.sh
 set -euo pipefail
 cd "$(dirname "$0")"
-echo "部署包版本：2026-10-29n"
+echo "部署包版本：2026-10-30o"
 DATA_DIR=${DATA_DIR:-$HOME/agent-portal-data}
 mkdir -p "$DATA_DIR"; chmod 700 "$DATA_DIR"
 export DATA_DIR

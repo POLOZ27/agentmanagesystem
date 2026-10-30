@@ -16,10 +16,10 @@
 <td class="small">{% if s.agent_id in agents %}<a href="{{ url_for('agent_detail', aid=s.agent_id) }}">{{ agents[s.agent_id].name }}</a>{% if s.agent_auto %}<div class="mute">{{ s.agent_auto }}</div>{% endif %}
 {% elif s.web_no and s.uses_agent %}<span class="tag t-warn">待分配</span>{% if s.agent_hint %}<div class="mute">申请表填写：{{ s.agent_hint }}</div>{% else %}<div class="mute">选了代理，但没填代理信息</div>{% endif %}
 <form method="post" action="{{ url_for('student_assign', sid=s.id) }}" style="margin-top:4px"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="back" value="{{ request.full_path }}">
-<select name="agent_id" onchange="this.form.submit()" style="max-width:190px"><option value="">— 分配给代理 —</option>{% for a in agent_list %}<option value="{{ a.id }}">{{ a.name }}{{ ' ' ~ a.code if a.code }}</option>{% endfor %}</select></form>
-{% elif s.web_no %}<span class="mute">直接申请</span><form method="post" action="{{ url_for('student_assign', sid=s.id) }}" style="margin-top:4px"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="back" value="{{ request.full_path }}">
+<select name="agent_id" onchange="this.form.submit()" style="max-width:190px"><option value="" disabled selected>— 选择 —</option><option value="self">学生自己申请（没有代理）</option>{% for a in agent_list %}<option value="{{ a.id }}">{{ a.name }}{{ ' ' ~ a.code if a.code }}</option>{% endfor %}</select></form>
+{% elif s.web_no %}<span class="mute">学生自己申请</span><form method="post" action="{{ url_for('student_assign', sid=s.id) }}" style="margin-top:4px"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="back" value="{{ request.full_path }}">
 <select name="agent_id" onchange="this.form.submit()" style="max-width:190px;font-size:12px"><option value="">改成某个代理…</option>{% for a in agent_list %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select></form>
-{% else %}<span class="mute">直接申请</span>{% endif %}</td>
+{% else %}<span class="mute">学生自己申请</span>{% endif %}</td>
 <td class="small">{{ PROGRAMS.get(s.program, s.program) }}</td><td class="small">{{ s.intake }}</td>
 <td><span class="tag {{ 't-活跃' if s.stage=='已入学' else ('t-bad' if s.stage=='未入学' else 't-已发结算单') }}">{{ s.stage }}</span>{% if s.commission_id %} <span class="tag">已入结算单</span>{% endif %}</td>
 <td class="small mute">{{ (s.history or {}).get(s.stage, '') }}</td>

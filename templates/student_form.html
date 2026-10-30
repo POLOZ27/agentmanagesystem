@@ -5,7 +5,7 @@
 {% else %}<form method="post" action="{{ url_for('student_to_statement', sid=st.id) }}"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn">加入 {{ agent.name if agent else '代理' }} 的 {{ st.intake }} 结算单</button> <span class="small mute">按代理合同自动算佣金</span></form>{% endif %}{% endif %}</div>{% endif %}
 <form method="post" enctype="multipart/form-data" class="card"><input type="hidden" name="_csrf" value="{{ csrf }}"><div class="grid">
 <div><label>学生姓名 *</label><input name="name" value="{{ st.name or '' }}" required></div>
-<div><label>代理</label><select name="agent_id"><option value="">直接申请（无代理）</option>{% for a in agents %}<option value="{{ a.id }}" {{ 'selected' if a.id == st.agent_id }}>{{ a.name }} {{ a.code or '' }}</option>{% endfor %}</select></div>
+<div><label>代理</label><select name="agent_id"><option value="">学生自己申请（没有代理）</option>{% for a in agents %}<option value="{{ a.id }}" {{ 'selected' if a.id == st.agent_id }}>{{ a.name }} {{ a.code or '' }}</option>{% endfor %}</select></div>
 <div><label>项目</label><select name="program">{% for k, v in PROGRAMS.items() %}<option value="{{ k }}" {{ 'selected' if st.program == k }}>{{ v }}</option>{% endfor %}</select></div>
 <div><label>年级</label><input name="grade" value="{{ st.grade or '' }}" placeholder="8–12"></div>
 <div><label>入学学期（和结算单学期一致）</label><input name="intake" list="terms" value="{{ st.intake or '' }}"><datalist id="terms">{% for t in terms %}<option>{{ t }}</option>{% endfor %}</datalist></div>
