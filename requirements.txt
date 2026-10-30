@@ -9,3 +9,4 @@ httpx>=0.27
 waitress>=3.0
 pypdfium2>=4.30
 pillow>=10
+psycopg[binary]>=3.2

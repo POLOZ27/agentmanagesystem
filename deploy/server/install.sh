@@ -2,7 +2,7 @@
 # 在服务器上运行（polo 在 docker 组，不需要 sudo）：bash ~/agent-portal/deploy/server/install.sh
 set -euo pipefail
 cd "$(dirname "$0")"
-echo "部署包版本：2026-10-29m"
+echo "部署包版本：2026-10-29n"
 DATA_DIR=${DATA_DIR:-$HOME/agent-portal-data}
 mkdir -p "$DATA_DIR"; chmod 700 "$DATA_DIR"
 export DATA_DIR
@@ -44,6 +44,8 @@ else
     echo "没找到 $LLM 容器，本地模型地址请在设置页手动填"
   fi
 fi
+# 官网入学申请（只读账号，由 setup-admissions.sh 生成）
+if [ -f .env.admissions ]; then set -a; . ./.env.admissions; set +a; echo "官网入学申请：已配置只读连接"; fi
 sed -e "s|SITES|$SITES|" -e "s|DEFAULT_IP|${IP:-localhost}|" Caddyfile.tmpl > Caddyfile
 echo "这次要装合同预览组件（LibreOffice），第一次构建会多花几分钟……"
 docker compose up -d --build
@@ -52,6 +54,11 @@ if [ -n "$LLM_NET" ]; then
   [ "$(docker inspect -f '{{.State.Running}}' "$LLM" 2>/dev/null)" = true ] || echo "注意：$LLM 容器没有在运行"
   docker network connect "$LLM_NET" agent-portal 2>/dev/null || true
   sleep 3   # 刚重建的容器接入网络后，DNS 要一会儿才生效
+fi
+if [ -n "${ADMISSIONS_DB_URL:-}" ]; then
+  docker network connect ja-internal agent-portal 2>/dev/null || true
+  sleep 2
+  docker exec agent-portal python -c "import admissions;print('官网申请连接：', len(admissions.fetch()), '份')" 2>&1 | tail -1 || true
 fi
 docker exec agent-portal python -c "import os,httpx;u=os.environ.get('AI_LOCAL_LLM_URL');k=os.environ.get('AI_LOCAL_LLM_KEY');print('本地模型连接：', httpx.get(u+'/models',headers={'Authorization':'Bearer '+k} if k else {},timeout=10).status_code if u else '未设置')" 2>&1 | tail -1 || true
 docker exec agent-portal python -c "import httpx;r=httpx.get('http://searxng:8080/search',params={'q':'study abroad agency Prague','format':'json'},timeout=30);print('搜索连接：',r.status_code,len(r.json().get('results',[])),'条')" 2>&1 | tail -1 || true

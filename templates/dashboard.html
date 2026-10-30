@@ -1,9 +1,9 @@
 {% extends "base.html" %}{% block body %}<h1>总览</h1>{% if t4a_due %}<div class="flash" style="background:var(--warnbg);color:var(--warn)">{{ t4a_due.year }} 年有 {{ t4a_due.n }} 个加拿大代理需要开 T4A，截止 {{ t4a_due.deadline }}。<a href="{{ url_for('payments', year=t4a_due.year) }}">去处理 →</a></div>{% endif %}
 <div class="row">
 <div class="card kpi"><div class="l">活跃代理</div><div class="n">{{ active }}</div><div class="small mute">共 {{ agents|length }} 个代理</div></div>
-<div class="card kpi"><div class="l">本学期佣金（{{ cur }}）</div><div class="n">{{ cur_total|money or '$0' }}</div><div class="small mute">{{ cur_rows|length }} 个代理有学生</div></div>
+<div class="card kpi"><div class="l">{{ ay }} 学年佣金</div><div class="n">{{ ay_total|money or '$0' }}</div><div class="small mute">{{ ay_agents }} 个代理有学生 · 本学期（{{ cur }}）{{ cur_total|money or '$0' }}</div></div>
 <div class="card kpi"><div class="l">未结清佣金</div><div class="n">{{ open_rows|map(attribute='amount')|sum|money or '$0' }}</div><div class="small mute">{{ open_rows|length }} 张结算单</div></div>
-<div class="card kpi"><div class="l">在办的学生申请</div><div class="n"><a href="{{ url_for('students') }}" style="color:inherit">{{ open_students }}</a></div><div class="small mute">本学期已入学 {{ enrolled_now }} 人</div></div>
+<div class="card kpi"><div class="l">在办的学生申请</div><div class="n"><a href="{{ url_for('students') }}" style="color:inherit">{{ open_students }}</a></div><div class="small mute">{{ ay }} 学年已入学 {{ enrolled_now }} 人</div></div>
 <div class="card kpi"><div class="l">开发中的潜在代理</div><div class="n">{{ prospects|rejectattr('stage','in',['已转为代理','不合适','待审核'])|list|length }}</div><div class="small mute">{{ followups|length }} 个该跟进了</div></div></div>
 
 <div class="card"><div class="toolbar"><h2 style="margin:0">佣金结算进度</h2><span style="flex:1"></span><a class="small" href="{{ url_for('commissions') }}">去结算 →</a></div>

@@ -2,12 +2,12 @@
 <div class="row" style="margin-bottom:12px">{% for k, v in LEVELS.items() %}<div class="card" style="margin:0;flex:1"><span class="tag lv-{{ k }}">{{ '高级 Premier' if k == 'premier' else '标准级 Standard' }}</span>
 <b style="font-size:18px;margin-left:6px">{{ v.y1 }}% / {{ v.y1_6 }}%</b><div class="small mute" style="margin-top:4px">第一年 {{ v.y1 }}%，同一学年第一年学生满 6 人 {{ v.y1_6 }}% · 第二年 {{ v.y2 }}% · 第三年 {{ v.y3 }}% · 兼职 {{ v.pt }}% · AP {{ v.ap }}%</div>
 <div class="small" style="margin-top:4px">本页 <b>{{ counts.get(k, 0) }}</b> 个代理按这个等级续签</div></div>{% endfor %}</div>
-<div class="card"><p class="small" style="margin:0">合同到期前 {{ renew_days }} 天出现在这里。到期前 {{ auto_days }} 天系统会按续签模板自动把新合同准备好（只生成，不发送），您检查后一键连同续签信发给代理。新合同从旧合同到期第二天开始，为期 3 年；等级按上一学年（{{ ay }}）业绩建议：第一年学生满 6 人建议高级。</p></div>
-<div class="card" style="padding:0"><table><tr><th>代理</th><th>到期</th><th>{{ ay }} 学年业绩</th><th>续签等级</th><th>新合同期</th><th>状态</th><th></th></tr>
+<div class="card"><p class="small" style="margin:0">合同到期前 {{ renew_days }} 天出现在这里。到期前 {{ auto_days }} 天系统会按续签模板自动把新合同准备好（只生成，不发送），您检查后一键连同续签信发给代理。新合同从旧合同到期第二天开始，为期 3 年；等级按上一个完整学年（{{ ay }}）业绩建议，本学年（{{ cay }}）已经满 6 人的也算：第一年学生满 6 人建议高级。</p></div>
+<div class="card" style="padding:0"><table><tr><th>代理</th><th>到期</th><th>{{ cay }} 学年（至今）<div class="small mute" style="font-weight:normal">{{ ay }} 学年</div></th><th>续签等级</th><th>新合同期</th><th>状态</th><th></th></tr>
 {% for x in rows %}{% set a = x.a %}{% set d = days_left(a.contract_expiry) %}<tr>
 <td><a href="{{ url_for('agent_detail', aid=a.id) }}">{{ a.name }}</a> <span class="small mute">{{ a.code }}</span>{% set lv = x.r.level or x.level %}<div style="margin-top:3px"><span class="tag lv-{{ lv }}">续签：{{ '高级' if lv == 'premier' else '标准级' }} {{ LEVELS[lv].y1 }}% / {{ LEVELS[lv].y1_6 }}%</span>{% if not a.level %} <span class="small mute">旧合同</span>{% endif %}</div></td>
 <td class="small">{{ a.contract_expiry }}<div class="mute">现在：{{ scheme_label(a) }}</div><span class="tag {{ 't-bad' if d < 0 else 't-warn' }}">{{ '已过期 %d 天'|format(-d) if d < 0 else '%d 天后'|format(d) }}</span></td>
-<td class="small">{{ x.stats.students }} 名学生 · 第一年 {{ x.stats.ft1 }} 人<br>佣金 {{ x.stats.commission|money or '$0' }}</td>
+<td class="small"><b>{{ x.cur.students }}</b> 名学生 · 第一年 <b>{{ x.cur.ft1 }}</b> 人 · 佣金 {{ x.cur.commission|money or '$0' }}<div class="mute">{{ ay }}：{{ x.stats.students }} 名学生 · 第一年 {{ x.stats.ft1 }} 人 · 佣金 {{ x.stats.commission|money or '$0' }}</div></td>
 {% set fid = 'rn' ~ loop.index %}
 <td><select name="level" form="{{ fid }}">{% for k, v in LEVELS.items() %}<option value="{{ k }}" {{ 'selected' if (x.r.level or x.level) == k }}>{{ '高级' if k == 'premier' else '标准级' }} {{ v.y1 }}% / {{ v.y1_6 }}%</option>{% endfor %}</select>{% if x.level == 'premier' and a.level == 'standard' %}<div class="small" style="color:var(--ok)">建议升级</div>{% endif %}
 {% set old_y1 = (a.rates or [0])[0] if not a.level else LEVELS[a.level].y1 %}{% set new_y1 = LEVELS[x.r.level or x.level].y1 %}{% if old_y1 > new_y1 %}<div class="small" style="color:var(--warn)">第一年 {{ old_y1|round(1) }}% → {{ new_y1 }}%（满 6 人 {{ LEVELS[x.r.level or x.level].y1_6 }}%）</div>{% endif %}</td>

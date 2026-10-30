@@ -14,6 +14,7 @@ from flask import (Flask, abort, flash, redirect, render_template, request, send
 
 import threading
 
+import admissions
 import ai
 import portal
 import backup
@@ -363,6 +364,8 @@ def dashboard():
     comms = vault.all("commission")
     rows = [enrich(c, agents, comms) for c in comms]
     cur_rows = [r for r in rows if r["term"] == cur]
+    ay = current_ay()
+    ay_rows = [r for r in rows if academic_year(r["term"]) == ay]
     open_rows = [r for r in rows if r["stage"] in STAGES[:-1] and not r.get("imported")]
     expiring = sorted([a for a in agents.values() if a.get("contract_expiry") and a.get("status") in ("活跃", "已签约")
                        and days_left(a["contract_expiry"]) <= 120], key=lambda a: a["contract_expiry"])
@@ -379,7 +382,8 @@ def dashboard():
             t4a_due = {"year": today.year - 1, "n": len(need), "deadline": tax.deadline(today.year - 1)}
     return render_template("dashboard.html", agents=agents, cur=cur, cur_rows=cur_rows, t4a_due=t4a_due,
                            open_students=sum(1 for x in studs if x.get("stage") not in ("已入学", "未入学")),
-                           enrolled_now=sum(1 for x in studs if x.get("stage") == "已入学" and x.get("intake") == cur),
+                           enrolled_now=sum(1 for x in studs if x.get("stage") == "已入学" and academic_year(x.get("intake") or "") == ay),
+                           ay=ay, ay_total=sum(r["amount"] for r in ay_rows), ay_agents=len({r["agent_id"] for r in ay_rows}),
                            cur_total=sum(r["amount"] for r in cur_rows), open_rows=open_rows,
                            stage_counts={s: [r for r in open_rows if r["stage"] == s] for s in STAGES[:-1]},
                            expiring=expiring, pipeline=pipeline, by_term=by_term,
@@ -1331,15 +1335,64 @@ def student_from_form(st, f):
     return st
 
 
+_adm_last = {"at": 0, "result": None, "error": None}
+
+
+def sync_admissions(force=False):
+    """同步官网入学申请（最多每 10 分钟一次，除非手动点「立即同步」）。"""
+    if not admissions.enabled() or (not force and time.time() - _adm_last["at"] < 600):
+        return _adm_last
+    _adm_last["at"] = time.time()
+    try:
+        _adm_last.update(result=admissions.sync(vault, STUDENT_STAGES), error=None)
+        if _adm_last["result"]["new"]:
+            vault.audit(f"admissions sync: {_adm_last['result']['new']} new")
+    except Exception as e:  # noqa: BLE001  官网数据库连不上不影响代理系统
+        _adm_last["error"] = f"{type(e).__name__}: {e}"[:200]
+    return _adm_last
+
+
+@app.post("/students/sync")
+@login_required
+def students_sync():
+    r = sync_admissions(force=True)
+    if r["error"]:
+        flash(f"同步官网申请失败：{r['error']}")
+    elif r["result"]:
+        x = r["result"]
+        flash(f"已同步官网申请：新增 {x['new']} 份，更新 {x['updated']} 份；待分配代理 {x['unassigned']} 份")
+    return redirect(url_for("students", **({"stage": "待分配"} if r.get("result") and r["result"]["unassigned"] else {})))
+
+
+@app.post("/students/<sid>/assign")
+@login_required
+def student_assign(sid):
+    st = vault.get("student", sid) or abort(404)
+    aid = request.form.get("agent_id", "")
+    if aid and not vault.get("agent", aid):
+        abort(400)
+    st.update(agent_id=aid, agent_manual=True, agent_auto="")
+    if not aid:
+        st["uses_agent"] = False  # 选「直接申请」= 确认没有代理，不再出现在待分配里
+    vault.put("student", st)
+    flash(f"{st.get('name', '')}：已分配给 {vault.get('agent', aid)['name']}" if aid else f"{st.get('name', '')}：标为直接申请")
+    back = request.form.get("back") or ""
+    return redirect(back if back.startswith("/") and not back.startswith("//") else url_for("students"))
+
+
 @app.route("/students")
 @login_required
 def students():
+    sync_admissions()
     f = {k: request.args.get(k, "") for k in ("stage", "agent", "intake", "q")}
     agents = agents_by_id()
     rows = vault.all("student")
+    unassigned = [s for s in rows if s.get("web_no") and s.get("uses_agent") and not s.get("agent_id")]
     intakes = sorted({s.get("intake") for s in rows if s.get("intake")})
     counts = {g: sum(1 for s in rows if s.get("stage") == g) for g in STUDENT_STAGES}
-    if f["stage"]:
+    if f["stage"] == "待分配":
+        rows = unassigned
+    elif f["stage"]:
         rows = [s for s in rows if s.get("stage") == f["stage"]]
     if f["agent"]:
         rows = [s for s in rows if s.get("agent_id") == f["agent"]]
@@ -1351,6 +1404,7 @@ def students():
     rows.sort(key=lambda s: (STUDENT_STAGES.index(s["stage"]) if s.get("stage") in STUDENT_STAGES else 9,
                              max((s.get("history") or {"": ""}).values())), reverse=False)
     return render_template("students.html", rows=rows, agents=agents, counts=counts, f=f, intakes=intakes,
+                           unassigned=len(unassigned), adm_on=admissions.enabled(), adm=_adm_last,
                            agent_list=sorted(agents.values(), key=lambda a: a.get("name", "")))
 
 
@@ -1370,7 +1424,10 @@ def student_edit(sid=None):
         if not st.get("stage") and not request.form.get("stage"):
             st["stage"] = "收到申请"
             st.setdefault("history", {})["收到申请"] = dt.date.today().isoformat()
+        before = st.get("agent_id")
         st = student_from_form(st, request.form)
+        if st.get("web_no") and st.get("agent_id") != before:
+            st.update(agent_manual=True, agent_auto="")
         doc = save_upload("doc")
         if doc:
             st.setdefault("docs", []).append(doc)
@@ -1425,6 +1482,13 @@ def student_to_statement(sid):
 # ---------- 合同续签 ----------
 RENEW_DAYS = 120   # 到期前多少天开始出现在续签列表
 AUTO_DRAFT_DAYS = 90  # 到期前多少天系统自动生成续签合同（只生成，不发送）
+
+
+def current_ay(today=None):
+    """现在所在的学年：9 月起算新学年，例如 2026-10 → 26-27。"""
+    today = today or dt.date.today()
+    y = today.year % 100 if today.month >= 9 else today.year % 100 - 1
+    return f"{y:02d}-{y + 1:02d}"
 
 
 def last_ay(today=None):
@@ -1544,19 +1608,22 @@ def auto_renewals():
 @login_required
 def renewals():
     refresh_old_drafts()
-    ay = last_ay()
+    ay, cay = last_ay(), current_ay()
     comms, agents = vault.all("commission"), agents_by_id()
     rows = []
     for a in renewal_candidates():
         stats = agent_ay_stats(a["id"], ay, comms, agents)
+        cur = agent_ay_stats(a["id"], cay, comms, agents)
         start, end = renewal_period(a)
-        rows.append({"a": a, "stats": stats, "level": suggest_level(a, stats), "start": start, "end": end,
+        # 等级按上一个完整学年；本学年第一年学生已经满 6 人的也建议高级
+        basis = cur if cur["ft1"] >= 6 else stats
+        rows.append({"a": a, "stats": stats, "cur": cur, "level": suggest_level(a, basis), "start": start, "end": end,
                      "r": a.get("renewal") or {}})
     counts = {}
     for x in rows:
         lv = x["r"].get("level") or x["level"]
         counts[lv] = counts.get(lv, 0) + 1
-    return render_template("renewals.html", rows=rows, ay=ay, counts=counts, auto_days=AUTO_DRAFT_DAYS, renew_days=RENEW_DAYS)
+    return render_template("renewals.html", rows=rows, ay=ay, cay=cay, counts=counts, auto_days=AUTO_DRAFT_DAYS, renew_days=RENEW_DAYS)
 
 
 @app.post("/agents/<aid>/renew")
@@ -1654,8 +1721,8 @@ def mail_translate():
 @login_required
 def performance():
     comms, agents = vault.all("commission"), agents_by_id()
-    ays = sorted({academic_year(c["term"]) for c in comms}, reverse=True)
-    ay = request.args.get("ay") or (ays[0] if ays else last_ay())
+    ays = sorted({academic_year(c["term"]) for c in comms} | {current_ay()}, reverse=True)
+    ay = request.args.get("ay") or current_ay()
     prev = f"{int(ay[:2]) - 1:02d}-{ay[:2]}" if re.fullmatch(r"\d\d-\d\d", ay) else ""
     studs = vault.all("student")
     today = dt.date.today()
@@ -2120,6 +2187,7 @@ def start_jobs():
                     auto_renewals()
                     purge_trash()
                     weekly_digest()
+                    sync_admissions()
             except Exception as e:
                 vault.audit(f"renewal job error: {type(e).__name__}")
             time.sleep(3600)

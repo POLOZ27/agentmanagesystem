@@ -14,6 +14,7 @@ services:
       AI_LOCAL_LLM_KEY: "${AI_LOCAL_LLM_KEY:-}"
       AI_LOCAL_MODEL: "${AI_LOCAL_MODEL:-}"
       AI_SEARXNG_URL: "http://searxng:8080"
+      ADMISSIONS_DB_URL: "${ADMISSIONS_DB_URL:-}"   # 官网入学申请只读连接（setup-admissions.sh 生成）
     volumes:
       - ${DATA_DIR:-/home/polo/agent-portal-data}:/data
       - type: bind
