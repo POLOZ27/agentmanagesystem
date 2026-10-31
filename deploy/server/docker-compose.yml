@@ -18,6 +18,8 @@ services:
       MS_APP_TENANT_ID: "${MS_APP_TENANT_ID:-}"     # 应用权限发信（setup-mail-app.sh 生成 .env.mail）
       MS_APP_CLIENT_ID: "${MS_APP_CLIENT_ID:-}"
       MS_APP_CLIENT_SECRET: "${MS_APP_CLIENT_SECRET:-}"
+      MS_APP_SENDERS: "${MS_APP_SENDERS:-}"         # 官网发信系统的发件人名单，自动带过来
+      MS_APP_SENDERS_GROUP: "${MS_APP_SENDERS_GROUP:-}"
     volumes:
       - ${DATA_DIR:-/home/polo/agent-portal-data}:/data
       - type: bind

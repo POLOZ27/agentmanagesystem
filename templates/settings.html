@@ -4,9 +4,9 @@
 {% if accts %}<table>{% for x in accts %}<tr><td><b>{{ x.user }}</b>{% if loop.first %} <span class="tag">默认</span>{% endif %}{% if x.app %} <span class="tag">只发信</span>{% endif %}</td>
 <td style="text-align:right;white-space:nowrap"><form method="post" action="{{ url_for('m365_test') }}" style="display:inline"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="user" value="{{ x.user }}"><button class="btn ghost">发测试邮件</button></form>
 {% if not x.app %}<form method="post" action="{{ url_for('m365_disconnect') }}" style="display:inline" onsubmit="return confirm('断开 {{ x.user }}？')"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="user" value="{{ x.user }}"><button class="btn ghost">断开</button></form>{% endif %}</td></tr>{% endfor %}</table>{% endif %}
-{% if app_on %}<form method="post" style="margin-top:10px"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>发件地址（和官网发信系统一样，直接填学校邮箱地址，每行一个，不用登录）</label>
+{% if app_on %}<form method="post" style="margin-top:10px"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>另外加的发件地址（官网发信系统的发件人已经自动带过来，在上面列表里；这里只填名单以外的，每行一个）</label>
 <textarea name="app_senders" rows="3" placeholder="admissions@cseec.ca">{{ cfg.app_senders or '' }}</textarea>
-<p class="small mute">这些地址只用来发信。代理回信要进系统的话，那个邮箱还要用下面的按钮登录连接一次。</p><p><button class="btn ghost">保存发件地址</button></p></form>{% endif %}
+<p class="small mute">这些地址只用来发信。代理回信要进系统的话，那个邮箱还要用下面的按钮登录连接一次。</p><p><button class="btn ghost">保存</button></p></form>{% endif %}
 {% if cfg.m365_client_id %}<p id="m365box"><button class="btn" type="button" id="m365go">{{ '再连接一个邮箱' if accts else '连接 Microsoft 账号' }}</button></p>
 <div id="m365msg" class="small"></div>
 <script>

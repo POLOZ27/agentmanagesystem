@@ -66,8 +66,45 @@ def app_on():
     return all(_app.values())
 
 
+def _addrs(text):
+    return [x.strip().lower() for x in (text or "").replace(";", ",").replace(",", "\n").splitlines() if "@" in x]
+
+
+def _group_members():
+    """官网发信系统的发件人组（MS_APP_SENDERS_GROUP，组邮箱或组 ID）里的成员，一小时刷新一次。"""
+    g = os.environ.get("MS_APP_SENDERS_GROUP", "").strip()
+    if not g:
+        return []
+    c = _token.get("@group")
+    if c and c["exp"] > time.time():
+        return c["list"]
+    out = []
+    try:
+        h = {"Authorization": "Bearer " + _app_token()}
+        if "@" in g:
+            j = httpx.get(GRAPH + "/groups", headers=h, timeout=20,
+                          params={"$filter": f"mail eq '{g}'", "$select": "id"}).json()
+            g = (j.get("value") or [{}])[0].get("id", "")
+        url = GRAPH + f"/groups/{g}/members?$select=mail,userPrincipalName&$top=100" if g else None
+        while url:
+            j = httpx.get(url, headers=h, timeout=20).json()
+            out += [(m.get("mail") or m.get("userPrincipalName") or "").lower() for m in j.get("value", [])]
+            url = j.get("@odata.nextLink")
+    except Exception:  # noqa: BLE001  没有读组的权限或网络问题时，只用名单里的地址
+        pass
+    out = [x for x in out if "@" in x]
+    _token["@group"] = {"list": out, "exp": time.time() + 3600}
+    return out
+
+
 def app_senders(cfg):
-    return [x.strip().lower() for x in (cfg.get("app_senders") or "").replace(",", "\n").splitlines() if "@" in x]
+    """可用的发件地址：官网发信系统的发件人名单和发件人组（自动读取）+ 设置页里另外加的。"""
+    seen, out = set(), []
+    for x in _addrs(os.environ.get("MS_APP_SENDERS")) + _group_members() + _addrs(cfg.get("app_senders")):
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
 
 
 def accounts(cfg):
