@@ -1,15 +1,10 @@
 {% extends "base.html" %}{% block body %}<h1>设置与安全</h1><div class="row">
-<div class="card"><h2>学校邮箱 · Microsoft 365 {% if cfg.m365_refresh %}<span class="tag t-活跃">已连接 {{ cfg.m365_user }}</span>{% else %}<span class="tag">未连接（演示模式）</span>{% endif %}</h2>
-<p class="small mute">用微软账号授权发信和收信，不保存邮箱密码。只收代理和潜在代理发来的邮件，不会改动你邮箱里其他邮件的已读状态。第一次需要在微软后台注册一个应用，拿到「应用程序 ID」，步骤见 Claude 发给你的说明。</p>
-<form method="post"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="m365_form" value="1">
-<div class="grid"><div><label>租户（学校域名）</label><input name="m365_tenant" value="{{ cfg.m365_tenant or 'cseec.ca' }}"></div>
-<div><label>应用程序（客户端）ID</label><input name="m365_client_id" value="{{ cfg.m365_client_id or '' }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
-<div><label>每周一汇总提醒发到</label><input name="digest_to" value="{{ cfg.digest_to or cfg.m365_user or '' }}" placeholder="polozhang@cseec.ca"></div>
-<div><label style="display:flex;gap:6px;align-items:center;margin-top:26px"><input type="checkbox" name="digest_on" value="1" style="width:auto" {{ 'checked' if cfg.get('digest_on', '1') == '1' }}> 每周一早上 8 点发汇总提醒</label></div></div>
-<p><button class="btn ghost">保存</button></p></form>
-{% if cfg.m365_client_id %}<p id="m365box"><button class="btn" type="button" id="m365go">{{ '重新连接' if cfg.m365_refresh else '连接 Microsoft 账号' }}</button>
-{% if cfg.m365_refresh %} <form method="post" action="{{ url_for('m365_disconnect') }}" style="display:inline"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn ghost">断开</button></form>
- <form method="post" action="{{ url_for('m365_test') }}" style="display:inline"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn ghost">给自己发一封测试邮件</button></form>{% endif %}</p>
+{% set accts = cfg.m365_accounts or [] %}<div class="card"><h2>学校邮箱 · Microsoft 365 {% if accts %}<span class="tag t-活跃">已连接 {{ accts|length }} 个邮箱</span>{% else %}<span class="tag">未连接（演示模式）</span>{% endif %}</h2>
+<p class="small mute">用微软账号授权发信和收信，不保存邮箱密码。可以连好几个邮箱，下面再按邮件类型指定用哪个发。每个邮箱都只收代理和潜在代理发来的邮件，不会改动邮箱里其他邮件的已读状态。</p>
+{% if accts %}<table>{% for x in accts %}<tr><td><b>{{ x.user }}</b>{% if loop.first %} <span class="tag">默认</span>{% endif %}</td>
+<td style="text-align:right;white-space:nowrap"><form method="post" action="{{ url_for('m365_test') }}" style="display:inline"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="user" value="{{ x.user }}"><button class="btn ghost">发测试邮件</button></form>
+<form method="post" action="{{ url_for('m365_disconnect') }}" style="display:inline" onsubmit="return confirm('断开 {{ x.user }}？')"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="user" value="{{ x.user }}"><button class="btn ghost">断开</button></form></td></tr>{% endfor %}</table>{% endif %}
+{% if cfg.m365_client_id %}<p id="m365box"><button class="btn" type="button" id="m365go">{{ '再连接一个邮箱' if accts else '连接 Microsoft 账号' }}</button></p>
 <div id="m365msg" class="small"></div>
 <script>
 document.getElementById('m365go').onclick = async () => {
@@ -17,7 +12,7 @@ document.getElementById('m365go').onclick = async () => {
   msg.textContent = '正在向微软申请登录码…';
   const r = await (await fetch('{{ url_for("m365_start") }}', {method: 'POST', body: fd})).json();
   if (r.error) { msg.textContent = r.error; return; }
-  msg.innerHTML = '请在电脑或手机上打开 <a href="' + r.verification_uri + '" target="_blank" rel="noopener">' + r.verification_uri + '</a>，输入代码 <b style="font-size:18px">' + r.user_code + '</b>，用 polozhang@cseec.ca 登录并同意。这个页面会自动等你完成…';
+  msg.innerHTML = '请在电脑或手机上打开 <a href="' + r.verification_uri + '" target="_blank" rel="noopener">' + r.verification_uri + '</a>，输入代码 <b style="font-size:18px">' + r.user_code + '</b>，用要连接的那个邮箱登录并同意（浏览器里已经登着别的账号时，选「使用其他帐户」）。这个页面会自动等你完成…';
   const poll = async () => {
     const p = new FormData(); p.append('_csrf', '{{ csrf }}'); p.append('device_code', r.device_code);
     const s = await (await fetch('{{ url_for("m365_poll_route") }}', {method: 'POST', body: p})).json();
@@ -27,7 +22,17 @@ document.getElementById('m365go').onclick = async () => {
   };
   setTimeout(poll, (r.interval || 5) * 1000);
 };
-</script>{% endif %}</div>
+</script>{% endif %}
+{% if accts|length > 1 %}<form method="post"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="route_form" value="1">
+<h3 style="margin-top:14px">哪类邮件用哪个邮箱发</h3><table>{% for k, label in MAIL_KINDS %}<tr><td>{{ label }}</td><td><select name="route_{{ k }}">{% for x in accts %}<option value="{{ x.user }}" {{ 'selected' if x.user == default_sender(k) }}>{{ x.user }}</option>{% endfor %}</select></td></tr>{% endfor %}</table>
+<p class="small mute">群发和续约邮件在写信页面上还可以临时换发件邮箱。</p><p><button class="btn">保存分配</button></p></form>{% endif %}
+<details style="margin-top:10px"><summary class="small">高级：应用 ID 和每周汇总</summary>
+<form method="post"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="m365_form" value="1">
+<div class="grid"><div><label>租户 ID</label><input name="m365_tenant" value="{{ cfg.m365_tenant or '' }}"></div>
+<div><label>应用程序（客户端）ID</label><input name="m365_client_id" value="{{ cfg.m365_client_id or '' }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
+<div><label>每周一汇总提醒发到</label><input name="digest_to" value="{{ cfg.digest_to or cfg.m365_user or '' }}" placeholder="polozhang@cseec.ca"></div>
+<div><label style="display:flex;gap:6px;align-items:center;margin-top:26px"><input type="checkbox" name="digest_on" value="1" style="width:auto" {{ 'checked' if cfg.get('digest_on', '1') == '1' }}> 每周一早上 8 点发汇总提醒</label></div></div>
+<p class="small mute">改了应用 ID 或租户，所有邮箱都要重新连接。</p><p><button class="btn ghost">保存</button></p></form></details></div>
 <details class="card"><summary><b>其他邮箱（SMTP / IMAP，用户名密码方式）</b></summary>
 <form method="post"><input type="hidden" name="_csrf" value="{{ csrf }}"><p class="small mute">不是 Microsoft 365 的邮箱用这里。微软邮箱已经不支持密码方式，请用上面的授权。</p>
 <div class="grid"><div><label>SMTP 服务器</label><input name="smtp_host" value="{{ cfg.smtp_host or '' }}"></div><div><label>端口</label><input name="smtp_port" value="{{ cfg.smtp_port or '587' }}"></div>

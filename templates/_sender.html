@@ -1,0 +1,1 @@
+{% set accts = mail_accounts() %}{% if accts|length > 1 %}<div><label>用哪个邮箱发</label><select name="sender">{% for x in accts %}<option value="{{ x.user }}" {{ 'selected' if x.user == default_sender(kind) }}>{{ x.user }}</option>{% endfor %}</select></div>{% endif %}

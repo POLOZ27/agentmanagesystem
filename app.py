@@ -97,7 +97,9 @@ def ctx():
     session.setdefault("csrf", secrets.token_hex(16))
     n_inbox = sum(b["complete"] for b in inbox.bundles(vault)) if vault.unlocked and session.get("ok") else 0
     return {"csrf": session["csrf"], "scheme_label": scheme_label, "unlocked": vault.unlocked, "portal_on": portal.enabled(),
-            "inbox_n": n_inbox, "parent_url": parent_url() if session.get("ok") else None}
+            "inbox_n": n_inbox, "parent_url": parent_url() if session.get("ok") else None,
+            "mail_accounts": lambda: mailer.accounts(settings()), "MAIL_KINDS": mailer.MAIL_KINDS,
+            "default_sender": lambda kind: (mailer.account_for(settings(), kind) or {}).get("user")}
 
 
 # 顶部导航里的一级页面不显示「返回」；其余页面的返回默认回到上一页，没有上一页时回到这里
@@ -594,7 +596,7 @@ def contract_generate(aid):
         tpl = et.fill(et.START_LETTER, agent=a.get("legal_name") or a["name"], contact=a.get("contact") or a["name"],
                       kit_link=kit_link())
         with mailer.Outbox(vault) as box:
-            box.send(a["email"], tpl["subject"], tpl["body"], [(fname, data)], agent_id=aid)
+            box.send(a["email"], tpl["subject"], tpl["body"], [(fname, data)], agent_id=aid, kind="onboarding")
         mark_step(a, "contract")
         flash("合同已生成，并连同 Start Letter 发给代理")
     else:
@@ -642,7 +644,7 @@ def agent_activate(aid):
     if a.get("email") and request.form.get("send"):
         tpl = et.fill(et.WELCOME, contact=a.get("contact") or a["name"], code=a["code"])
         with mailer.Outbox(vault) as box:
-            box.send(a["email"], tpl["subject"], tpl["body"], agent_id=aid)
+            box.send(a["email"], tpl["subject"], tpl["body"], agent_id=aid, kind="onboarding")
     mark_step(a, "activate")
     vault.put("agent", a)
     flash(f"{a['name']} 已开通（{a['code']}），之后会自动收到每月 News")
@@ -841,7 +843,7 @@ def send_statement(c, agents, box):
     e, name, data = _statement_file(c, agents)
     a = e["agent"]
     tpl = et.fill(et.COMMISSION_STATEMENT, agent=a.get("name"), term=c["term"], amount=money(e["calc"]))
-    box.send(a.get("email") or "", tpl["subject"], tpl["body"], [(name, data)], agent_id=a.get("id"),
+    box.send(a.get("email") or "", tpl["subject"], tpl["body"], [(name, data)], agent_id=a.get("id"), kind="statement",
              commission_id=c["id"])
     c["locked"] = {"lines": e["lines"], "total": e["calc"], "y1_rate": y1_rate_used(e["scheme"], ay_group(c), c)}
     for prior in ay_group(c):  # 本单已包含补差，之前的单子不再重复补
@@ -918,7 +920,7 @@ def commission_accountant(cid):
     if c.get("invoice"):
         files.append((c["invoice"]["name"], vault.get_file(c["invoice"]["fid"])))
     with mailer.Outbox(vault) as box:
-        box.send(cfg["accountant_email"], tpl["subject"], tpl["body"], files, commission_id=cid)
+        box.send(cfg["accountant_email"], tpl["subject"], tpl["body"], files, commission_id=cid, kind="accountant")
     c.update(status="已交会计", to_accountant_on=dt.date.today().isoformat(), pay_method=method)
     vault.put("commission", c)
     flash("已发给会计付款")
@@ -941,7 +943,7 @@ def commission_paid(cid):
             tpl = et.fill(et.PAYMENT_NOTICE, agent=a.get("name"), term=c["term"], amount=money(e["amount"]),
                           method=c["pay_method"], date=c["paid_on"])
             with mailer.Outbox(vault) as box:
-                box.send(a["email"], tpl["subject"], tpl["body"], agent_id=a["id"], commission_id=cid)
+                box.send(a["email"], tpl["subject"], tpl["body"], agent_id=a["id"], commission_id=cid, kind="statement")
     flash("已登记付款，本单结算完成")
     return redirect(url_for("commission_edit", cid=cid))
 
@@ -1183,7 +1185,7 @@ def outreach():
                     continue
                 lang = i18n.lang_for(p.get("country"))
                 subject, body, _ = i18n.compose(p, english, custom.get(lang, False))
-                box.send(p["email"], subject, body, prospect_id=p["id"])
+                box.send(p["email"], subject, body, prospect_id=p["id"], kind="outreach")
                 today = dt.date.today().isoformat()
                 p["first_email_on"] = p.get("first_email_on") or today
                 p["last_email_on"] = today
@@ -1272,10 +1274,11 @@ def compose():
     if request.method == "POST":
         f = request.form
         c = {"subject": f["subject"], "body": f["body"], "audience": f["audience"],
-             "agent_ids": f.getlist("agent_ids"), "cadence": f["cadence"]}
+             "agent_ids": f.getlist("agent_ids"), "cadence": f["cadence"], "sender": f.get("sender") or None}
         when = f.get("send_at")
         if f["cadence"] == "立即发送" and not when:
-            sent = mailer.send_to_agents(vault, mailer.recipients(vault, c), c["subject"], c["body"])
+            sent = mailer.send_to_agents(vault, mailer.recipients(vault, c), c["subject"], c["body"],
+                                         sender=c["sender"])
             flash(f"已处理 {len(sent)} 封邮件")
             return redirect(url_for("mail", box="out"))
         c.update(active=True, next_at=when or dt.datetime.now().isoformat(timespec="minutes"),
@@ -1693,7 +1696,7 @@ def renew_mail(aid):
             a["mail_lang"] = request.form.get("lang")
         with mailer.Outbox(vault) as box:
             box.send(to, request.form["subject"], request.form["body"], [(c["name"], vault.get_file(c["fid"]))],
-                     agent_id=aid)
+                     agent_id=aid, kind="renewal", sender=request.form.get("sender"))
         a["renewal"]["sent"] = dt.date.today().isoformat()
         vault.put("agent", a)
         flash(f"续签合同和续签信已发给 {a['name']}，签回后在代理页面上传即可")
@@ -1864,7 +1867,7 @@ def payments_send(year):
                           amount=money(s["total"]), t4a_line=line)
             box.send(a["email"], tpl["subject"], tpl["body"],
                      [(f"JA {year} Commission Payments {a.get('code', '')}.xlsx", tax.agent_statement(year, s))],
-                     agent_id=a["id"])
+                     agent_id=a["id"], kind="statement")
             sent += 1
     flash(f"已给 {sent} 个代理发出 {year} 年度付款明细")
     return redirect(url_for("payments", year=year))
@@ -2032,7 +2035,11 @@ def settings_page():
                 cfg["digest_on"] = "1" if f.get("digest_on") else "0"
                 if (f.get("m365_client_id", "").strip() != cfg.get("m365_client_id", "")
                         or f.get("m365_tenant", "").strip() != cfg.get("m365_tenant", "")):
-                    cfg.pop("m365_refresh", None)  # 换了应用或租户，要重新授权
+                    cfg.pop("m365_accounts", None)  # 换了应用或租户，所有邮箱都要重新授权
+                    cfg.pop("mail_route", None)
+            if f.get("route_form"):
+                users = {x["user"] for x in mailer.accounts(cfg)}
+                cfg["mail_route"] = {k: f.get("route_" + k) for k, _ in mailer.MAIL_KINDS if f.get("route_" + k) in users}
             for k in ("m365_tenant", "m365_client_id", "digest_to",
                       "smtp_host", "smtp_port", "smtp_user", "from_addr", "imap_host", "imap_user", "accountant_email",
                       "ai_mode", "local_llm_url", "local_model", "searxng_url", "openai_model"):
@@ -2077,24 +2084,22 @@ def m365_poll_route():
 @app.post("/settings/m365/disconnect")
 @login_required
 def m365_disconnect():
-    cfg = settings()
-    for k in ("m365_refresh", "m365_user"):
-        cfg.pop(k, None)
-    mailer._token.clear()
-    vault.put("settings", cfg)
-    vault.audit("Microsoft 365 mail disconnected")
-    flash("已断开 Microsoft 365，回到演示模式")
+    user = request.form.get("user", "")
+    mailer.m365_remove(vault, user)
+    vault.audit("Microsoft 365 mailbox disconnected")
+    left = mailer.accounts(settings())
+    flash(f"已断开 {user}" + ("" if left else "，回到演示模式") + ("；原来分给它的邮件改用默认邮箱发" if left else ""))
     return redirect(url_for("settings_page"))
 
 
 @app.post("/settings/m365/test")
 @login_required
 def m365_test():
-    cfg = settings()
+    user = request.form.get("user") or settings().get("m365_user")
     try:
         with mailer.Outbox(vault) as box:
-            box.send(cfg.get("m365_user"), "代理管理系统 · 测试邮件", "这是一封测试邮件，说明系统已经可以用你的邮箱发信了。")
-        flash(f"测试邮件已发到 {cfg.get('m365_user')}，请查收")
+            box.send(user, "代理管理系统 · 测试邮件", f"这是一封测试邮件，说明系统已经可以用 {user} 发信了。", sender=user)
+        flash(f"测试邮件已从 {user} 发给它自己，请查收")
     except Exception as e:  # noqa: BLE001
         flash(f"发送失败：{e}")
     return redirect(url_for("settings_page"))
@@ -2170,7 +2175,7 @@ def weekly_digest(force=False):
     inbox_n = sum(1 for m in vault.all("mail") if m["direction"] == "in" and m.get("at", "") >= week_ago)
     lines += [f"四、过去 7 天收到的代理邮件：{inbox_n} 封", "", "详情请在学校网络里打开 https://192.168.1.75:8443 查看。"]
     with mailer.Outbox(vault) as box:
-        box.send(to, f"代理管理 · 每周汇总 {today.isoformat()}", "\n".join(lines))
+        box.send(to, f"代理管理 · 每周汇总 {today.isoformat()}", "\n".join(lines), kind="digest")
     rec = vault.get("settings", "mail") or {"id": "mail"}
     rec["digest_last"] = today.isoformat()
     vault.put("settings", rec)

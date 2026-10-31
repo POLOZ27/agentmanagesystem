@@ -5,7 +5,7 @@
 <button class="btn ghost small" id="tr" type="button">🌐 翻译</button><button class="btn ghost small" id="reset" type="button" hidden>恢复英文</button></div>
 <form method="post" class="card" id="f"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="lang" id="langval" value="{{ lang }}">
 <p class="small mute" style="margin-top:0">{% if lang %}按代理所在国家（{{ a.country }}）预选了 {{ langs[lang] }}。{% elif a.country %}{{ a.country }} 没有对应的翻译语言，默认只发英文；需要的话在右上角选语言。{% endif %}翻译用学校服务器上的本地模型，大约要 1 分钟，翻译完可以再改。</p>
-<div class="grid"><div><label>收件人</label><input name="to" type="email" value="{{ a.email or '' }}" required></div>
+<div class="grid"><div><label>收件人</label><input name="to" type="email" value="{{ a.email or '' }}" required></div>{% with kind = "renewal" %}{% include "_sender.html" %}{% endwith %}
 <div><label>附件</label><div style="padding:8px 0">📎 <a href="{{ url_for('contract_edit', aid=a.id, i=r.contract, back=request.path) }}">{{ c.name }}</a> <span class="small mute">（点开可在线预览 / 修改）</span></div></div></div>
 <label>主题</label><input name="subject" id="subject" required value="{{ tpl.subject }}">
 <label>正文</label><textarea name="body" id="body" required style="min-height:420px">{{ tpl.body }}</textarea>

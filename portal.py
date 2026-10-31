@@ -85,7 +85,7 @@ def register(app, vault, deps):
                 _codes[email] = (hashlib.sha256(code.encode()).hexdigest(), time.time() + CODE_MINUTES * 60, 5)
                 tpl = deps["et"].fill(deps["et"].LOGIN_CODE, code=code)
                 with deps["mailer"].Outbox(vault) as box:
-                    box.send(a["email"], tpl["subject"], tpl["body"], agent_id=a["id"])
+                    box.send(a["email"], tpl["subject"], tpl["body"], agent_id=a["id"], kind="portal")
                 vault.audit("portal code sent")
             session["portal_email"] = email
             return redirect(url_for("portal_verify"))
