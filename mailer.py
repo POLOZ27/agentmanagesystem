@@ -56,8 +56,41 @@ def _raw(vault):
     return _migrate(vault.get("settings", "mail") or {"id": "mail"})
 
 
+# 应用权限发信（和官网 ja-mail 同一种方式）：服务器 .env.mail 里放应用 ID 和密钥，
+# 设置页只填发件地址，不用每个邮箱登录。密钥只在服务器环境变量里，不进保险库也不进代码。
+_app = {"tenant": os.environ.get("MS_APP_TENANT_ID", ""), "client": os.environ.get("MS_APP_CLIENT_ID", ""),
+        "secret": os.environ.get("MS_APP_CLIENT_SECRET", "")}
+
+
+def app_on():
+    return all(_app.values())
+
+
+def app_senders(cfg):
+    return [x.strip().lower() for x in (cfg.get("app_senders") or "").replace(",", "\n").splitlines() if "@" in x]
+
+
 def accounts(cfg):
-    return cfg.get("m365_accounts") or []
+    """所有可用的发件邮箱：登录连接的（能发也能收回信）+ 应用权限的发件地址（只发信）。"""
+    accts = list(cfg.get("m365_accounts") or [])
+    if app_on():
+        have = {x["user"] for x in accts}
+        accts += [{"user": u, "app": True} for u in app_senders(cfg) if u not in have]
+    return accts
+
+
+def _app_token():
+    t = _token.get("@app")
+    if t and t["exp"] > time.time():
+        return t["access"]
+    r = httpx.post(f"https://login.microsoftonline.com/{_app['tenant']}/oauth2/v2.0/token", timeout=20, data={
+        "grant_type": "client_credentials", "client_id": _app["client"], "client_secret": _app["secret"],
+        "scope": "https://graph.microsoft.com/.default"})
+    j = r.json()
+    if "access_token" not in j:
+        raise RuntimeError("应用发信授权失败：" + j.get("error", "未知错误"))
+    _token["@app"] = {"access": j["access_token"], "exp": time.time() + int(j.get("expires_in", 3600)) - 120}
+    return j["access_token"]
 
 
 def account_for(cfg, kind=None):
@@ -89,8 +122,8 @@ def m365_poll(vault, device_code):
     user = (me.get("mail") or me.get("userPrincipalName", "")).lower()
     _token[user] = {"access": j["access_token"], "exp": time.time() + int(j.get("expires_in", 3600)) - 120}
     rec = _raw(vault)
-    accts = [x for x in accounts(rec) if x["user"] != user]
-    old = next((x for x in accounts(rec) if x["user"] == user), {})
+    accts = [x for x in (rec.get("m365_accounts") or []) if x["user"] != user]
+    old = next((x for x in (rec.get("m365_accounts") or []) if x["user"] == user), {})
     accts.append({"user": user, "refresh": j["refresh_token"],
                   "since": old.get("since") or dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")})
     rec["m365_accounts"] = accts
@@ -100,7 +133,7 @@ def m365_poll(vault, device_code):
 
 def m365_remove(vault, user):
     rec = _raw(vault)
-    rec["m365_accounts"] = [x for x in accounts(rec) if x["user"] != user]
+    rec["m365_accounts"] = [x for x in (rec.get("m365_accounts") or []) if x["user"] != user]
     rec["mail_route"] = {k: v for k, v in (rec.get("mail_route") or {}).items() if v != user}
     _token.pop(user, None)
     vault.put("settings", rec)
@@ -120,7 +153,7 @@ def _graph_token(vault, cfg, acct):
     if j.get("refresh_token") and j["refresh_token"] != acct["refresh"]:  # 刷新令牌会轮换，保存新的
         acct["refresh"] = j["refresh_token"]
         rec = _raw(vault)
-        for x in accounts(rec):
+        for x in (rec.get("m365_accounts") or []):
             if x["user"] == acct["user"]:
                 x["refresh"] = j["refresh_token"]
         vault.put("settings", rec)
@@ -128,14 +161,18 @@ def _graph_token(vault, cfg, acct):
 
 
 def _graph(vault, cfg, acct, method, path, **kw):
-    h = {"Authorization": "Bearer " + _graph_token(vault, cfg, acct), **kw.pop("headers", {})}
+    if acct.get("app"):  # 应用权限：用 /users/{地址}，不是 /me
+        tok, path = _app_token(), path.replace("/me/", f"/users/{acct['user']}/", 1)
+    else:
+        tok = _graph_token(vault, cfg, acct)
+    h = {"Authorization": "Bearer " + tok, **kw.pop("headers", {})}
     r = httpx.request(method, GRAPH + path, headers=h, timeout=60, **kw)
     r.raise_for_status()
     return r.json() if r.content else {}
 
 
 def m365_on(cfg):
-    return bool(accounts(cfg) and cfg.get("m365_client_id"))
+    return bool(cfg.get("m365_accounts") and cfg.get("m365_client_id")) or bool(app_on() and app_senders(cfg))
 
 
 def mail_on(cfg):
@@ -249,7 +286,7 @@ def _fetch_m365(vault, cfg, by_email, prospects):
     seen_rec = vault.get("settings", "mail_seen") or {"id": "mail_seen", "ids": []}
     seen = set(seen_rec["ids"])
     n = 0
-    for acct in accounts(cfg):
+    for acct in cfg.get("m365_accounts") or []:  # 只读登录连接的邮箱；应用权限只用来发信
         since = acct.get("since") or dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         j = _graph(vault, cfg, acct, "GET", "/me/mailFolders/inbox/messages",
                    headers={"Prefer": 'outlook.body-content-type="text"'},

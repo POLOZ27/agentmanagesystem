@@ -2040,7 +2040,7 @@ def settings_page():
             if f.get("route_form"):
                 users = {x["user"] for x in mailer.accounts(cfg)}
                 cfg["mail_route"] = {k: f.get("route_" + k) for k, _ in mailer.MAIL_KINDS if f.get("route_" + k) in users}
-            for k in ("m365_tenant", "m365_client_id", "digest_to",
+            for k in ("app_senders", "m365_tenant", "m365_client_id", "digest_to",
                       "smtp_host", "smtp_port", "smtp_user", "from_addr", "imap_host", "imap_user", "accountant_email",
                       "ai_mode", "local_llm_url", "local_model", "searxng_url", "openai_model"):
                 if k in f:
@@ -2052,7 +2052,7 @@ def settings_page():
             flash("设置已加密保存")
         return redirect(url_for("settings_page"))
     log = [(dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M"), e) for t, e in vault.audit_log()]
-    return render_template("settings.html", cfg=cfg, log=log, trusted_n=len(_trusted_load()), this_trusted=device_trusted(), portal_on=portal.enabled(), bk=backup.status(DATA_DIR), bk_dir=backup.backup_dir(),
+    return render_template("settings.html", cfg=cfg, app_on=mailer.app_on(), log=log, trusted_n=len(_trusted_load()), this_trusted=device_trusted(), portal_on=portal.enabled(), bk=backup.status(DATA_DIR), bk_dir=backup.backup_dir(),
                            bk_files=backup.listing()[:5])
 
 

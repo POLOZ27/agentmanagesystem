@@ -15,6 +15,9 @@ services:
       AI_LOCAL_MODEL: "${AI_LOCAL_MODEL:-}"
       AI_SEARXNG_URL: "http://searxng:8080"
       ADMISSIONS_DB_URL: "${ADMISSIONS_DB_URL:-}"   # 官网入学申请只读连接（setup-admissions.sh 生成）
+      MS_APP_TENANT_ID: "${MS_APP_TENANT_ID:-}"     # 应用权限发信（setup-mail-app.sh 生成 .env.mail）
+      MS_APP_CLIENT_ID: "${MS_APP_CLIENT_ID:-}"
+      MS_APP_CLIENT_SECRET: "${MS_APP_CLIENT_SECRET:-}"
     volumes:
       - ${DATA_DIR:-/home/polo/agent-portal-data}:/data
       - type: bind

@@ -2,7 +2,7 @@
 # 在服务器上运行（polo 在 docker 组，不需要 sudo）：bash ~/agent-portal/deploy/server/install.sh
 set -euo pipefail
 cd "$(dirname "$0")"
-echo "部署包版本：2026-10-31p"
+echo "部署包版本：2026-10-31q"
 DATA_DIR=${DATA_DIR:-$HOME/agent-portal-data}
 mkdir -p "$DATA_DIR"; chmod 700 "$DATA_DIR"
 export DATA_DIR
@@ -46,6 +46,7 @@ else
 fi
 # 官网入学申请（只读账号，由 setup-admissions.sh 生成）
 if [ -f .env.admissions ]; then set -a; . ./.env.admissions; set +a; echo "官网入学申请：已配置只读连接"; fi
+if [ -f .env.mail ]; then set -a; . ./.env.mail; set +a; echo "应用权限发信：已配置"; fi
 sed -e "s|SITES|$SITES|" -e "s|DEFAULT_IP|${IP:-localhost}|" Caddyfile.tmpl > Caddyfile
 echo "这次要装合同预览组件（LibreOffice），第一次构建会多花几分钟……"
 docker compose up -d --build

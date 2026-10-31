@@ -1,9 +1,12 @@
 {% extends "base.html" %}{% block body %}<h1>设置与安全</h1><div class="row">
-{% set accts = cfg.m365_accounts or [] %}<div class="card"><h2>学校邮箱 · Microsoft 365 {% if accts %}<span class="tag t-活跃">已连接 {{ accts|length }} 个邮箱</span>{% else %}<span class="tag">未连接（演示模式）</span>{% endif %}</h2>
+{% set accts = mail_accounts() %}<div class="card"><h2>学校邮箱 · Microsoft 365 {% if accts %}<span class="tag t-活跃">已连接 {{ accts|length }} 个邮箱</span>{% else %}<span class="tag">未连接（演示模式）</span>{% endif %}</h2>
 <p class="small mute">用微软账号授权发信和收信，不保存邮箱密码。可以连好几个邮箱，下面再按邮件类型指定用哪个发。每个邮箱都只收代理和潜在代理发来的邮件，不会改动邮箱里其他邮件的已读状态。</p>
-{% if accts %}<table>{% for x in accts %}<tr><td><b>{{ x.user }}</b>{% if loop.first %} <span class="tag">默认</span>{% endif %}</td>
+{% if accts %}<table>{% for x in accts %}<tr><td><b>{{ x.user }}</b>{% if loop.first %} <span class="tag">默认</span>{% endif %}{% if x.app %} <span class="tag">只发信</span>{% endif %}</td>
 <td style="text-align:right;white-space:nowrap"><form method="post" action="{{ url_for('m365_test') }}" style="display:inline"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="user" value="{{ x.user }}"><button class="btn ghost">发测试邮件</button></form>
-<form method="post" action="{{ url_for('m365_disconnect') }}" style="display:inline" onsubmit="return confirm('断开 {{ x.user }}？')"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="user" value="{{ x.user }}"><button class="btn ghost">断开</button></form></td></tr>{% endfor %}</table>{% endif %}
+{% if not x.app %}<form method="post" action="{{ url_for('m365_disconnect') }}" style="display:inline" onsubmit="return confirm('断开 {{ x.user }}？')"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="user" value="{{ x.user }}"><button class="btn ghost">断开</button></form>{% endif %}</td></tr>{% endfor %}</table>{% endif %}
+{% if app_on %}<form method="post" style="margin-top:10px"><input type="hidden" name="_csrf" value="{{ csrf }}"><label>发件地址（和官网发信系统一样，直接填学校邮箱地址，每行一个，不用登录）</label>
+<textarea name="app_senders" rows="3" placeholder="admissions@cseec.ca">{{ cfg.app_senders or '' }}</textarea>
+<p class="small mute">这些地址只用来发信。代理回信要进系统的话，那个邮箱还要用下面的按钮登录连接一次。</p><p><button class="btn ghost">保存发件地址</button></p></form>{% endif %}
 {% if cfg.m365_client_id %}<p id="m365box"><button class="btn" type="button" id="m365go">{{ '再连接一个邮箱' if accts else '连接 Microsoft 账号' }}</button></p>
 <div id="m365msg" class="small"></div>
 <script>
