@@ -51,7 +51,6 @@ echo "这次要装合同预览组件（LibreOffice），第一次构建会多花
 docker compose up -d --build
 docker compose up -d --force-recreate caddy   # 让 Caddyfile 修改生效
 if [ -n "$LLM_NET" ]; then
-  [ "$(docker inspect -f '{{.State.Running}}' "$LLM" 2>/dev/null)" = true ] || echo "注意：$LLM 容器没有在运行"
   docker network connect "$LLM_NET" agent-portal 2>/dev/null || true
   sleep 3   # 刚重建的容器接入网络后，DNS 要一会儿才生效
 fi
