@@ -43,9 +43,13 @@ def parse_scheme(text):
 def agent_scheme(a):
     """代理的完整比例表 {y1, y1_6, y2, y3, pt, ap}。"""
     if a.get("level") in LEVELS:
-        return dict(LEVELS[a["level"]])
-    r = a.get("rates") or [0, 0, 0]
-    return {"label": "自定义（旧合同）", "y1": r[0], "y1_6": r[0], "y2": r[1], "y3": r[2], "pt": PART_TIME_RATE, "ap": 10}
+        sc = dict(LEVELS[a["level"]])
+    else:
+        r = a.get("rates") or [0, 0, 0]
+        sc = {"label": "自定义（旧合同）", "y1": r[0], "y1_6": r[0], "y2": r[1], "y3": r[2], "pt": PART_TIME_RATE, "ap": 10}
+    if isinstance(a.get("ap_rate"), (int, float)):  # 合同里写的 AP 课程佣金比例
+        sc["ap"] = a["ap_rate"]
+    return sc
 
 
 def scheme_label(rates_or_agent):

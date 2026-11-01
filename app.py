@@ -588,6 +588,13 @@ def contract_generate(aid):
         a["code"] = next_code()
     a["level"] = level
     a["rates"] = [LEVELS[level]["y1"], LEVELS[level]["y2"], LEVELS[level]["y3"]]
+    if "ap_rate" in request.form:  # AP 课程佣金 %，留空 = 合同上留空手填
+        ap = request.form["ap_rate"].strip().rstrip("%")
+        try:
+            a["ap_rate"] = float(ap) if ap else ""
+        except ValueError:
+            flash("AP 佣金比例要填数字，比如 10")
+            return redirect(url_for("agent_detail", aid=aid))
     fname, data = contracts.generate(a, level, start, end)
     a.setdefault("contracts", []).append({"name": fname, "fid": vault.put_file(data), "expiry": end.isoformat(),
                                           "uploaded": dt.date.today().isoformat(), "kind": "待签（系统生成）",
@@ -1660,7 +1667,7 @@ def renewal_candidates():
                   key=lambda a: a["contract_expiry"])
 
 
-TEMPLATE_REV = 3  # 2：乙方信息按甲方的字体字号填写；3：签名行每页底部 + 页码，乙方地址电话等留空给代理填
+TEMPLATE_REV = 4  # 2：乙方信息按甲方的字体字号填写；3：签名行每页底部 + 页码，乙方地址电话等留空给代理填；4：AP 课程佣金单列一项
 
 
 def refresh_old_drafts():

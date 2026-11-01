@@ -20,6 +20,7 @@ import docx
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
+from docx.text.paragraph import Paragraph
 
 from commission import LEVELS
 
@@ -62,6 +63,39 @@ def _set_cell(cell, value):
         r = p.add_run(str(value))
         r.bold = False
         r.font.size = Pt(12)
+
+
+def _ap_section(d, s, e, rate):
+    """AP 课程佣金单列一项「c.」（POLO 2026-11-01 要求）：合同期 + 比例。比例默认 10%，
+    写成下划线填空，POLO 可以在线改或打印后手填；rate 为空时只留空格。"""
+    ps = d.paragraphs
+    ap = next((p for p in ps if p.text.strip().startswith("AP Program:")), None)
+    pt = next((p for p in ps if "for a part-time student" in p.text), None)
+    if ap is None or pt is None:
+        return
+    head = copy.deepcopy(pt._p)  # 同一个编号列表，自动排成 c.
+    ap._p.addprevious(head)
+    hp = Paragraph(head, ap._parent)
+    for r in hp.runs[1:]:
+        r._r.getparent().remove(r._r)
+    hp.runs[0].text = (f"Starting from {s} to {e} if Party B has completed the standard application process "
+                       "of Party A for a student taking AP (Advanced Placement) courses.")
+    runs = ap.runs
+    for r in runs[1:]:
+        r._r.getparent().remove(r._r)
+    runs[0].text = "Party A will pay Party B "
+    rpr = runs[0]._r.rPr
+
+    def add(text):  # 新加的字沿用第一段字的字体字号
+        r = ap.add_run(text)
+        if rpr is not None:
+            r._r.insert(0, copy.deepcopy(rpr))
+        return r
+    blank = add(f"   {rate:g}   " if rate not in (None, "") else "            ")
+    blank.underline = True
+    blank.bold = True
+    add("% of the AP course tuition fee that is paid by the student the first time. "
+        "The tuition fee for the following terms is not applicable.")
 
 
 def _is_blank(el):
@@ -140,7 +174,8 @@ def default_period(start=None, years=3):
 
 
 def generate(agent, level, start, end, master=MASTER, renew=False):
-    """返回 (文件名, docx 字节)。续签用同一份母版，只是合同期和文件名不同。"""
+    """返回 (文件名, docx 字节)。续签用同一份母版，只是合同期和文件名不同。
+    AP 课程佣金比例用 agent["ap_rate"]（没设过 = 等级默认 10%，空字符串 = 合同上留空手填）。"""
     rates = LEVELS[level]
     d = docx.Document(master)
     s, e = start.strftime("%B %d, %Y"), end.strftime("%B %d, %Y")
@@ -151,6 +186,8 @@ def generate(agent, level, start, end, master=MASTER, renew=False):
                 _replace(p, r"^\s*\d+\s*%", f"{rates['y1']:g}%")
             elif "6 or more" in p.text:
                 _replace(p, r"^\s*\d+\s*%", f"{rates['y1_6']:g}%")
+    ap_rate = agent.get("ap_rate", rates.get("ap", 10))
+    _ap_section(d, s, e, float(ap_rate) if ap_rate not in (None, "") else None)
     t = d.tables
     name = agent.get("legal_name") or agent.get("name", "")
     _set_cell(t[1].rows[0].cells[1], name)
