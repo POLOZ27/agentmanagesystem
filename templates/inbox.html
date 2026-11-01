@@ -7,12 +7,16 @@
 {% if pv %}<div class="card"><h2>{{ sel }} 的内容</h2>
 {% if pv.students %}{% set sp = pv.students %}
 <h3>学生 {{ sp.rows|length }} 名{% if sp.pack.source %} <span class="small mute">来自 {{ sp.pack.source }}</span>{% endif %}</h3>
-<p class="small mute">导入后在「学生申请」里。名字和系统里已有的学生一样的会合并，不会重复；你手动分配过代理的学生不会被改。</p>
+<p class="small mute">「归到代理」一栏可以直接改，导入时按你选的为准（改过的行变蓝）。导入后在「学生申请」里。名字和系统里已有的学生一样的会合并，不会重复；你手动分配过代理的学生不会被改。</p>
 <div class="tablewrap"><table class="small"><tr><th>学生</th><th>年级</th><th>归到代理</th><th>类别</th><th>本地/国际</th><th class="r">本学期学费</th><th>备注</th></tr>
 {% for x in sp.rows %}<tr{% if x.agent_missing %} style="background:#fff4e0"{% endif %}><td>{{ x.name }}{% if x.exists %} <span class="tag">已有，合并</span>{% endif %}</td><td>{{ x.grade or '' }}</td>
-<td>{% if x.agent %}{{ x.agent.name }} <span class="mute">{{ x.agent.code }}</span>{% elif x.self %}<span class="mute">学生自己申请（没有代理）</span>{% else %}<b>待分配</b>（文件夹写的：{{ x.agent_hint or x.agent_code }}）{% endif %}</td>
+<td><select name="agent_{{ x.i }}" form="importform" style="max-width:260px" onchange="this.closest('tr').style.background=this.value===this.dataset.orig?'':'#e8f4ff'" data-orig="{{ x.agent.id if x.agent else ('self' if x.self else '') }}">
+<option value="" {{ 'selected' if not x.agent and not x.self }}>待分配{% if x.agent_hint %}（文件夹写的：{{ x.agent_hint }}）{% endif %}</option>
+<option value="self" {{ 'selected' if x.self }}>学生自己申请（没有代理）</option>
+{% for a in sp.agent_list %}<option value="{{ a.id }}" {{ 'selected' if x.agent and x.agent.id == a.id }}>{{ a.name }}{{ ' ' ~ a.code if a.code }}</option>{% endfor %}</select></td>
 <td>{{ PROGRAMS.get(x.program, x.program) }}</td><td>{{ x.origin or '' }}</td><td class="r">{{ x.tuition|money if x.tuition else '' }}</td><td class="mute">{{ x.note or '' }}</td></tr>{% endfor %}</table></div>
 <h3>结算单草稿 {{ sp.stmts|length }} 张（只建草稿，不会发信）</h3>
+<p class="small mute">下表是按建议的代理排的；上面改了代理，导入时结算单会跟着按你选的代理建。</p>
 <table class="small"><tr><th>代理</th><th>学期</th><th>学生</th><th>附件底稿（以前的 Student Roster）</th><th></th></tr>
 {% for x in sp.stmts %}<tr{% if not x.agent or x.locked %} style="background:#fff4e0"{% endif %}><td>{{ x.agent.name if x.agent else (x.agent_hint or x.agent_code) }}</td><td>{{ x.term }}</td><td>{{ x.students|join('、') }}</td><td>{{ x.roster or '没有，附件只放本学期' }}</td>
 <td>{% if not x.agent %}系统里没有这个代理，不建{% elif x.locked %}这学期结算单已发出，不改{% elif x.existing %}合并进已有草稿{% else %}新建{% endif %}</td></tr>{% endfor %}</table>
@@ -22,7 +26,7 @@
 <table><tr><th>编号</th><th>代理</th><th>比例</th><th>E-transfer / 收款邮箱</th><th>支票抬头</th><th>银行 / 备注</th></tr>
 {% for a in pv.agents %}<tr{% if a.pay_changed %} style="background:#fde8e8"{% endif %}><td>{{ a.code or '—' }}</td><td>{{ a.name }}{% if a.exists %} <span class="tag">已存在</span>{% endif %}</td><td class="small">{{ a.scheme_text }}</td><td class="small">{{ a.etransfer or '' }}</td><td class="small">{{ a.payee or '' }}</td><td class="small">{{ a.detail or '' }}</td></tr>{% endfor %}</table>
 {% endif %}{% if pv.contracts %}<details><summary>合同文件（{{ pv.contracts|length }}）</summary><table>{% for n, code, exp, p in pv.contracts %}<tr><td class="small">{{ n }}</td><td>{{ code or '无编号，不导入' }}</td><td>{{ exp or '' }}</td></tr>{% endfor %}</table></details>{% endif %}
-<form method="post" action="{{ url_for('inbox_import', name=sel) }}" onsubmit="this.querySelector('button').textContent='正在导入，请稍等…'"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<form method="post" id="importform" action="{{ url_for('inbox_import', name=sel) }}" onsubmit="this.querySelector('button').textContent='正在导入，请稍等…'"><input type="hidden" name="_csrf" value="{{ csrf }}">
 {% if pv.agents or pv.rows %}<p class="small"><label style="display:inline"><input type="checkbox" name="confirm" value="1"> 我确认要再次导入（系统里已有代理时才需要）</label></p>{% endif %}
 <p><button class="btn">核对无误，导入</button></p></form>
 <form method="post" action="{{ url_for('inbox_delete', name=sel) }}" onsubmit="return confirm('删除这个包？不会导入任何内容。')"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn ghost">不导入，删除这个包</button></form></div>{% endif %}

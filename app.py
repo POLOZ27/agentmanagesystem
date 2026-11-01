@@ -2072,29 +2072,59 @@ def _student_match(name, pool):
                  and (ws <= set(_name_key(s.get("name")).split()) or set(_name_key(s.get("name")).split()) <= ws)), None)
 
 
-def _students_pack(z):
+def _students_pack(z, choice=None):
+    """choice：预览页里每个学生选的代理 {行号: 代理id / "self" / ""（待分配）}，没选的用包里的建议。
+    结算单按最后选定的代理重新分组：包里本学期要结算的学生，换了代理就跟着进新代理的草稿。"""
     pack = json.loads(z.read("students.json").decode("utf-8"))
-    codes = {a.get("code"): a for a in vault.all("agent") if a.get("code")}
+    agents = agents_by_id()
+    codes = {a.get("code"): a for a in agents.values() if a.get("code")}
     have = vault.all("student")
     comms = vault.all("commission")
-    rows = []
-    for x in pack.get("students", []):
-        a = codes.get(x.get("agent_code"))
-        old = _student_match(x["name"], have)
-        rows.append(dict(x, agent=a, exists=old, agent_missing=bool(x.get("agent_code") or x.get("agent_hint")) and not a))
-    stmts = []
+    choice = choice or {}
+    plan = {}  # 学生名 -> 包里的结算单
     for st in pack.get("statements", []):
-        a = codes.get(st.get("agent_code"))
-        cur = next((c for c in comms if a and c["agent_id"] == a["id"] and c["term"] == st["term"]), None)
-        r = (pack.get("rosters") or {}).get(st.get("agent_code")) or {}
-        stmts.append(dict(st, agent=a, existing=cur, locked=bool(cur and cur.get("locked")),
-                          roster=r.get("name"), n=len(st.get("students", []))))
+        for n in st.get("students", []):
+            plan[n] = st
+    rows = []
+    for i, x in enumerate(pack.get("students", [])):
+        a, self_ = codes.get(x.get("agent_code")), bool(x.get("self"))
+        pick = choice.get(i)
+        if pick is not None:
+            a, self_ = (agents.get(pick), False) if pick not in ("", "self") else (None, pick == "self")
+        old = _student_match(x["name"], have)
+        rows.append(dict(x, i=i, agent=a, self=self_, exists=old, changed=pick is not None and (
+            (a or {}).get("code") != x.get("agent_code") or self_ != bool(x.get("self"))),
+            agent_missing=not a and not self_))
+    groups = {}
+    for x in rows:
+        st = plan.get(x["name"])
+        if not st:
+            continue
+        key = x["agent"]["id"] if x["agent"] else ("?" + (st.get("agent_hint") or st.get("agent_code") or "") if not x["self"] else None)
+        if key is None:
+            continue
+        g = groups.setdefault(key, {"term": st["term"], "students": [], "agent": x["agent"]})
+        g["students"].append(x["name"])
+        if not x["agent"]:
+            g["agent_hint"] = x.get("agent_hint") or st.get("agent_hint")
+    by_code = {st.get("agent_code"): st for st in pack.get("statements", []) if st.get("agent_code")}
+    stmts = []
+    for key, g in groups.items():
+        a = g["agent"]
+        meta = by_code.get(a.get("code")) if a else None
+        meta = meta or {}
+        cur = next((c for c in comms if a and c["agent_id"] == a["id"] and c["term"] == g["term"]), None)
+        r = (pack.get("rosters") or {}).get(a.get("code")) if a else None
+        stmts.append(dict(meta, term=g["term"], students=g["students"], agent=a, agent_code=a.get("code") if a else None,
+                          agent_hint=g.get("agent_hint"), existing=cur, locked=bool(cur and cur.get("locked")),
+                          roster=(r or {}).get("name") or ((a or {}).get("roster") or {}).get("name"), n=len(g["students"])))
+    stmts.sort(key=lambda x: (x["agent"] is None, (x["agent"] or {}).get("code") or ""))
     return pack, rows, stmts
 
 
-def _students_import(z):
+def _students_import(z, choice=None):
     """导入学生（按名字合并，不重复）、归到代理、建本学期结算单草稿和邮件草稿、存各代理的 Roster 底稿。都不会发信。"""
-    pack, rows, stmts = _students_pack(z)
+    pack, rows, stmts = _students_pack(z, choice)
     today = dt.date.today().isoformat()
     by_name = {}
     n_new = n_upd = 0
@@ -2112,7 +2142,9 @@ def _students_import(z):
         if x.get("note"):
             st["notes"] = x["note"]
         st["roster_note"] = x.get("roster_note") or ""
-        if not st.get("agent_manual"):  # 你手动分配过的不改
+        if x.get("changed"):
+            st["agent_manual"] = True  # 在导入预览里改过的，算你手动分配
+        if x.get("changed") or not st.get("agent_manual"):  # 你以前手动分配过的不改
             if x["agent"]:
                 st.update(agent_id=x["agent"]["id"], uses_agent=True)
             elif x.get("self"):
@@ -2206,7 +2238,7 @@ def inbox_page():
                 if "students.json" in names:
                     spack, srows, sstmts = _students_pack(z)
                     spv = {"pack": spack, "rows": srows, "stmts": sstmts,
-                           "agents": agents_by_id()}
+                           "agent_list": sorted(vault.all("agent"), key=lambda a: a.get("name", "").lower())}
                 else:
                     spv = None
                 pv = {"agents": agents, "rows": len(records), "contracts": cf, "students": spv,
@@ -2239,7 +2271,8 @@ def inbox_import(name):
             if "tracker.xlsx" in z.namelist():
                 msg.append(f"{import_tracker(z.read('tracker.xlsx'))} 个潜在代理")
             if "students.json" in z.namelist():
-                n_new, n_upd, n_stmt, skipped = _students_import(z)
+                choice = {int(k[6:]): v for k, v in request.form.items() if k.startswith("agent_") and k[6:].isdigit()}
+                n_new, n_upd, n_stmt, skipped = _students_import(z, choice)
                 msg.append(f"学生新增 {n_new} 名、更新 {n_upd} 名，{n_stmt} 张结算单草稿（含邮件和附件草稿，都没有发出）"
                            + ("；没建结算单：" + "、".join(skipped) if skipped else ""))
     except Exception as e:
