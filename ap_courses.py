@@ -1,7 +1,7 @@
 """从 AP 学分课程管理系统（同一台服务器上的 ap-courses 容器）读取中介推荐的学生，同步到「学生申请进度」。
 
 只读 /api/agent-feed：学生、课程、实收学费、中介信息，看不到家长、成绩等其他数据。地址和密钥由环境变量 AP_FEED_URL、AP_FEED_TOKEN 提供。
-学费已到账的学生进度记为「已入学」，之后和其他学生一样一键加进结算单，佣金按代理等级里的 AP 比例（合同 10%）计算。
+学费已到账的学生进度记为「已入学」，之后和其他学生一样一键加进结算单，佣金比例用 AP 系统按这家代理合同给的比例（10%、15% 或 0）。
 """
 import datetime as dt
 import os
@@ -60,11 +60,12 @@ def sync(vault, commissions_locked=None):
             vault.put("student", {"ap_id": r["ap_student_id"], "origin": "AP 学分课程", "name": r.get("name") or "",
                                   "grade": re.sub(r"\D", "", str(r.get("grade") or "")), "intake": _intake(r), "program": "AP",
                                   "courses": courses, "tuition": paid, "agent_id": aid or "", "agent_auto": how, "uses_agent": True,
-                                  "agent_hint": hint, "stage": stage, "history": {stage: dt.date.today().isoformat()}})
+                                  "agent_hint": hint, "stage": stage, "history": {stage: dt.date.today().isoformat()},
+                                  "rate": (r.get("commission_rate") or 0) * 100})
             new += 1
             continue
         changed = False
-        for k, v in (("tuition", paid), ("courses", courses), ("agent_hint", hint)):
+        for k, v in (("tuition", paid), ("courses", courses), ("agent_hint", hint), ("rate", (r.get("commission_rate") or 0) * 100)):
             if st.get(k) != v:
                 st[k] = v
                 changed = True

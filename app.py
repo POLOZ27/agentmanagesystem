@@ -1598,7 +1598,7 @@ def student_to_statement(sid):
         c = {"agent_id": st["agent_id"], "term": st["intake"], "term_order": orders.get(st["intake"], len(orders) + 100),
              "status": "草稿", "students": []}
     row = {"name": st["name"], "program": st.get("program") or "FT1", "courses": st.get("courses") or "",
-           "origin": st.get("origin") or "International", "tuition": st.get("tuition") or 0, "note": "", "rate": None,
+           "origin": st.get("origin") or "International", "tuition": st.get("tuition") or 0, "note": "", "rate": st.get("rate"),
            "student_id": st["id"]}
     c["students"] = [r for r in c.get("students", []) if r.get("student_id") != st["id"]] + [row]
     c = vault.put("commission", c)
