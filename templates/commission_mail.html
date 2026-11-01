@@ -1,0 +1,33 @@
+{% extends "base.html" %}{% block title %}预览结算邮件{% endblock %}{% block body %}
+<div class="toolbar" style="flex-wrap:wrap"><h1 style="margin:0">{{ '发出的' if c.locked else '预览' }}结算邮件 · {{ a.name }}</h1><span class="mute">{{ c.term }}</span><span class="tag t-{{ c.stage }}">{{ c.stage }}</span><span style="flex:1"></span>
+<a class="btn ghost" href="{{ url_for('commission_edit', cid=c.id) }}">回到结算单</a></div>
+
+<div class="card"><h2>邮件</h2>
+{% if c.locked %}<p class="small mute">{{ c.sent_on }} 已发出，下面是发出时的内容。</p>{% endif %}
+<form method="post"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<fieldset style="border:0;padding:0;margin:0" {{ 'disabled' if c.locked }}>
+<label>收件人</label><input name="to" value="{{ m.to }}" placeholder="代理邮箱，多个用逗号隔开">
+<label>标题</label><input name="subject" value="{{ m.subject }}">
+<label>正文</label><textarea name="body" rows="18" style="width:100%;font-family:inherit">{{ m.body }}</textarea>
+<label>附件里 Agent 一栏写的称呼</label><input name="agent_label" value="{{ agent_label }}" style="max-width:260px">
+<p><button class="btn ghost">保存修改</button> <span class="small mute">保存后附件会按新称呼重新生成</span></p>
+</fieldset></form></div>
+
+<div class="card"><h2>附件 <a href="{{ url_for('commission_roster', cid=c.id) }}">📎 {{ att_name }}</a></h2>
+<p class="small mute">{% if roster.fid %}以 {{ roster.name }}（{{ roster.updated or '' }}）为底稿，保留以前所有学期，{% else %}这个代理还没有 Roster 底稿，附件只有本学期一个工作表。{% endif %}
+最后一个工作表「{{ new_sheet }}」是按结算单生成的，学生或金额要改请回到结算单修改。</p>
+<div class="inline" style="flex-wrap:wrap;gap:6px;margin-bottom:8px">{% for s in sheets %}<button type="button" class="btn {{ '' if s.title == new_sheet else 'ghost' }} small sheet-tab" data-i="{{ loop.index0 }}">{{ s.title }}{% if s.title == new_sheet %} · 本学期{% endif %}</button>{% endfor %}</div>
+{% for s in sheets %}<div class="sheet" data-i="{{ loop.index0 }}" style="{{ '' if s.title == new_sheet else 'display:none' }}"><div class="tablewrap"><table class="small">
+{% for r in s.rows %}{% set tag = 'th' if loop.first else 'td' %}{% if loop.first or r|join('') %}<tr>{% for v in r %}<{{ tag }} style="white-space:nowrap">{{ v }}</{{ tag }}>{% endfor %}</tr>{% endif %}{% endfor %}
+</table></div>{% if s.more %}<p class="small mute">只显示前 60 行，完整内容请下载。</p>{% endif %}</div>{% endfor %}
+{% if not c.locked %}<form method="post" enctype="multipart/form-data" class="inline" style="margin-top:10px"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div style="flex:3"><label>换一个 Roster 底稿（这个代理以前的 Student Roster Excel）</label><input type="file" name="roster" accept=".xlsx"></div><div><button class="btn ghost">上传</button></div></form>
+{% if roster.fid %}<form method="post" onsubmit="return confirm('不用底稿，附件只放本学期？')"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn ghost small" name="roster_reset" value="1">不用底稿</button></form>{% endif %}{% endif %}
+</div>
+
+{% if not c.locked %}<div class="card"><h2>发出</h2>
+<p>佣金合计 <b>{{ c.calc|money }}</b> · {{ c.students|length }} 名学生 · 收件人 {{ m.to or '（还没填）' }}</p>
+<form method="post" action="{{ url_for('commission_send', cid=c.id) }}" onsubmit="return confirm('确认把邮件和附件发给 {{ m.to }}？发出后金额锁定。')"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<button class="btn" {{ 'disabled' if not m.to or not c.lines }}>确认发出</button> <span class="small mute">先点上面的「保存修改」再发；没保存的改动不会发出</span></form></div>{% endif %}
+<script>document.querySelectorAll('.sheet-tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.sheet').forEach(d=>d.style.display=d.dataset.i===b.dataset.i?'':'none');document.querySelectorAll('.sheet-tab').forEach(x=>x.classList.toggle('ghost',x!==b));});</script>
+{% endblock %}

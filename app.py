@@ -838,12 +838,48 @@ def commission_statement(cid):
     return send_file(io.BytesIO(data), download_name=name, as_attachment=True)
 
 
-def send_statement(c, agents, box):
-    """第 1 步：锁定金额，生成对账单，发结算邮件给代理。"""
-    e, name, data = _statement_file(c, agents)
+def term_phrase(term):
+    """'Sep-Dec Fall 26-27' -> '26-27 Sep-Dec Fall School Semester'（和以前发给代理的邮件标题一样）。"""
+    m = re.match(r"^(.*?)\s*(\d{2}-\d{2})$", term or "")
+    return f"{m.group(2)} {m.group(1)} School Semester" if m and m.group(1) else term
+
+
+def roster_name(a, today=None):
+    """附件名照以前的写法：<代理> Student Roster Update Nov-1-2026.xlsx"""
+    today = today or dt.date.today()
+    r = a.get("roster") or {}
+    prefix = r.get("prefix") or re.sub(r"(\s+(last\s+)?update)?(\s+[A-Za-z]{3,9}-\d{1,2}-\d{2,4})?\.xlsx$", "",
+                                        r.get("name") or "", flags=re.I).strip() or f"{a.get('name', '')} Student Roster"
+    return f"{prefix} Update {today.strftime('%b')}-{today.day}-{today.year}.xlsx"
+
+
+def roster_attachment(c, agents):
+    """代理以前的 Student Roster + 本学期新工作表。代理还没有 Roster 底稿时，新建一个只有本学期的。"""
+    e = enrich(c, agents)
     a = e["agent"]
-    tpl = et.fill(et.COMMISSION_STATEMENT, agent=a.get("name"), term=c["term"], amount=money(e["calc"]))
-    box.send(a.get("email") or "", tpl["subject"], tpl["body"], [(name, data)], agent_id=a.get("id"), kind="statement",
+    r = a.get("roster") or {}
+    base = vault.get_file(r["fid"]) if r.get("fid") else None
+    label = r.get("agent_label") or statements.last_agent_label(base) or a.get("contact") or a.get("name", "")
+    data = statements.roster_workbook(base, c["term"], c, e["lines"], e["scheme"], label)
+    return e, roster_name(a), data
+
+
+def statement_mail(c, a, e):
+    """结算邮件草稿：存过的（预览页里改过的）优先，否则按模板生成。"""
+    d = c.get("draft_mail") or {}
+    tpl = et.fill(et.COMMISSION_ROSTER if (a.get("roster") or c.get("draft_mail")) else et.COMMISSION_STATEMENT,
+                  agent=d.get("greet") or a.get("greet") or a.get("name"), term=term_phrase(c["term"]),
+                  amount=money(e["calc"]))
+    return {"subject": d.get("subject") or tpl["subject"], "body": d.get("body") or tpl["body"],
+            "to": d.get("to") or a.get("email") or ""}
+
+
+def send_statement(c, agents, box):
+    """第 1 步：锁定金额，发结算邮件给代理。附件是代理的 Student Roster（以前所有学期 + 本学期新工作表）。"""
+    e, name, data = roster_attachment(c, agents)
+    a = e["agent"]
+    m = statement_mail(c, a, e)
+    box.send(m["to"], m["subject"], m["body"], [(name, data)], agent_id=a.get("id"), kind="statement",
              commission_id=c["id"])
     c["locked"] = {"lines": e["lines"], "total": e["calc"], "y1_rate": y1_rate_used(e["scheme"], ay_group(c), c)}
     for prior in ay_group(c):  # 本单已包含补差，之前的单子不再重复补
@@ -852,7 +888,13 @@ def send_statement(c, agents, box):
             vault.put("commission", prior)
     c["status"] = "已发结算单"
     c["sent_on"] = dt.date.today().isoformat()
+    c["sent_file"] = {"name": name, "fid": vault.put_file(data)}
     vault.put("commission", c)
+    # 发出去的这份就是代理最新的 Roster，下个学期在它后面再加工作表
+    a = vault.get("agent", a["id"])
+    old = a.get("roster") or {}
+    a["roster"] = dict(old, name=name, fid=c["sent_file"]["fid"], updated=c["sent_on"])
+    vault.put("agent", a)
 
 
 @app.post("/commissions/<cid>/send")
@@ -860,13 +902,79 @@ def send_statement(c, agents, box):
 def commission_send(cid):
     c = vault.get("commission", cid) or abort(404)
     agents = agents_by_id()
-    if not agents.get(c["agent_id"], {}).get("email"):
-        flash("这个代理还没有邮箱，先到代理资料里补上")
+    if c.get("locked"):
+        flash("这张结算单已经发出过了")
         return redirect(url_for("commission_edit", cid=cid))
+    to = (c.get("draft_mail") or {}).get("to") or agents.get(c["agent_id"], {}).get("email")
+    if not to:
+        flash("这个代理还没有邮箱，先在预览页填收件人，或到代理资料里补上")
+        return redirect(url_for("commission_mail", cid=cid))
     with mailer.Outbox(vault) as box:
         send_statement(c, agents, box)
-    flash("结算单已发给代理，等代理确认并回发票")
+    flash("结算邮件和 Student Roster 已发给代理，等代理确认并回发票")
     return redirect(url_for("commission_edit", cid=cid))
+
+
+@app.route("/commissions/<cid>/mail", methods=["GET", "POST"])
+@login_required
+def commission_mail(cid):
+    """发出前预览：邮件正文可以改，附件（Student Roster）每个工作表都能直接看。"""
+    c = vault.get("commission", cid) or abort(404)
+    agents = agents_by_id()
+    a = agents.get(c["agent_id"]) or abort(404)
+    if request.method == "POST" and not c.get("locked"):
+        if request.form.get("roster_reset"):
+            a.pop("roster", None)
+            vault.put("agent", a)
+            flash("已去掉 Roster 底稿，附件改为只有本学期的新表")
+        elif request.files.get("roster") and request.files["roster"].filename:
+            f = request.files["roster"]
+            if not f.filename.lower().endswith(".xlsx"):
+                flash("请上传 .xlsx")
+            else:
+                data = f.read()
+                old = a.get("roster") or {}
+                a["roster"] = {"name": os.path.basename(f.filename), "fid": vault.put_file(data),
+                               "updated": dt.date.today().isoformat(), "agent_label": old.get("agent_label", "")}
+                vault.put("agent", a)
+                flash("已换成新的 Roster 底稿，附件已按它重新生成")
+        else:
+            d = c.get("draft_mail") or {}
+            for k in ("to", "subject", "body"):
+                d[k] = (request.form.get(k) or "").strip()
+            c["draft_mail"] = d
+            if request.form.get("agent_label") is not None:
+                r = a.get("roster") or {}
+                r["agent_label"] = request.form.get("agent_label", "").strip()
+                if a.get("roster"):
+                    a["roster"] = r
+                    vault.put("agent", a)
+            vault.put("commission", c)
+            flash("邮件草稿已保存")
+        return redirect(url_for("commission_mail", cid=cid))
+    if c.get("locked") and c.get("sent_file"):
+        e = enrich(c, agents)
+        name, data = c["sent_file"]["name"], vault.get_file(c["sent_file"]["fid"])
+    else:
+        e, name, data = roster_attachment(c, agents)
+    m = statement_mail(c, a, e)
+    sheets = statements.preview(data)
+    r = a.get("roster") or {}
+    return render_template("commission_mail.html", c=e, a=a, m=m, att_name=name, sheets=sheets,
+                           new_sheet=statements.sheet_title(c["term"]), roster=r,
+                           agent_label=r.get("agent_label") or statements.last_agent_label(
+                               vault.get_file(r["fid"]) if r.get("fid") else None) or a.get("name", ""))
+
+
+@app.route("/commissions/<cid>/roster.xlsx")
+@login_required
+def commission_roster(cid):
+    c = vault.get("commission", cid) or abort(404)
+    if c.get("locked") and c.get("sent_file"):
+        name, data = c["sent_file"]["name"], vault.get_file(c["sent_file"]["fid"])
+    else:
+        _, name, data = roster_attachment(c, agents_by_id())
+    return send_file(io.BytesIO(data), download_name=name, as_attachment=True)
 
 
 @app.post("/commissions/send-all")
@@ -1392,7 +1500,7 @@ def students():
     f = {k: request.args.get(k, "") for k in ("stage", "agent", "intake", "q")}
     agents = agents_by_id()
     rows = vault.all("student")
-    unassigned = [s for s in rows if s.get("web_no") and s.get("uses_agent") and not s.get("agent_id")]
+    unassigned = [s for s in rows if (s.get("web_no") or s.get("agent_hint")) and s.get("uses_agent") and not s.get("agent_id")]
     intakes = sorted({s.get("intake") for s in rows if s.get("intake")})
     counts = {g: sum(1 for s in rows if s.get("stage") == g) for g in STUDENT_STAGES}
     if f["stage"] == "待分配":
@@ -1939,6 +2047,123 @@ def _contract_files(z):
     return out
 
 
+def _name_key(n):
+    """同一个学生不同写法算一个：'Li, jiaheng' = 'Jiaheng Li'；括号里的英文名不算。"""
+    n = re.sub(r"\(.*?\)", " ", n or "").replace(",", " ").lower()
+    return " ".join(sorted(w for w in re.split(r"\s+", n) if w))
+
+
+def _student_match(name, pool):
+    k = _name_key(name)
+    hit = next((s for s in pool if _name_key(s.get("name")) == k), None)
+    if hit:
+        return hit
+    ws = set(k.split())  # 系统里少写了英文名（Mai Bo / Mai Bo Jason）也算同一个人
+    return next((s for s in pool if len(ws & set(_name_key(s.get("name")).split())) >= 2
+                 and (ws <= set(_name_key(s.get("name")).split()) or set(_name_key(s.get("name")).split()) <= ws)), None)
+
+
+def _students_pack(z):
+    pack = json.loads(z.read("students.json").decode("utf-8"))
+    codes = {a.get("code"): a for a in vault.all("agent") if a.get("code")}
+    have = vault.all("student")
+    comms = vault.all("commission")
+    rows = []
+    for x in pack.get("students", []):
+        a = codes.get(x.get("agent_code"))
+        old = _student_match(x["name"], have)
+        rows.append(dict(x, agent=a, exists=old, agent_missing=bool(x.get("agent_code") or x.get("agent_hint")) and not a))
+    stmts = []
+    for st in pack.get("statements", []):
+        a = codes.get(st.get("agent_code"))
+        cur = next((c for c in comms if a and c["agent_id"] == a["id"] and c["term"] == st["term"]), None)
+        r = (pack.get("rosters") or {}).get(st.get("agent_code")) or {}
+        stmts.append(dict(st, agent=a, existing=cur, locked=bool(cur and cur.get("locked")),
+                          roster=r.get("name"), n=len(st.get("students", []))))
+    return pack, rows, stmts
+
+
+def _students_import(z):
+    """导入学生（按名字合并，不重复）、归到代理、建本学期结算单草稿和邮件草稿、存各代理的 Roster 底稿。都不会发信。"""
+    pack, rows, stmts = _students_pack(z)
+    today = dt.date.today().isoformat()
+    by_name = {}
+    n_new = n_upd = 0
+    for x in rows:
+        st = x["exists"] or {"history": {}, "docs": []}
+        if not x["exists"]:
+            n_new += 1
+        else:
+            n_upd += 1
+        for k in ("name", "grade", "program", "origin", "intake", "courses", "period", "folder"):
+            if x.get(k) not in (None, ""):
+                st[k] = x[k] if k != "name" or not x["exists"] else st.get("name") or x[k]
+        if x.get("tuition") is not None:
+            st["tuition"] = x["tuition"]
+        if x.get("note"):
+            st["notes"] = x["note"]
+        st["roster_note"] = x.get("roster_note") or ""
+        if not st.get("agent_manual"):  # 你手动分配过的不改
+            if x["agent"]:
+                st.update(agent_id=x["agent"]["id"], uses_agent=True)
+            elif x.get("self"):
+                st.update(agent_id="", uses_agent=False)
+            else:
+                st.update(agent_id="", uses_agent=True, agent_hint=x.get("agent_hint") or x.get("agent_code") or "")
+        if x.get("stage") in STUDENT_STAGES and st.get("stage") != x["stage"]:
+            st["stage"] = x["stage"]
+            st.setdefault("history", {})[x["stage"]] = today
+        st["imported_from"] = pack.get("source", "")
+        st = vault.put("student", st)
+        by_name[x["name"]] = st
+    rosters = pack.get("rosters") or {}
+    n_stmt, skipped = 0, []
+    orders = {t: i for i, t in enumerate(terms())}
+    for x in stmts:
+        a = x["agent"]
+        if not a:
+            skipped.append(f"{x.get('agent_hint') or x.get('agent_code')}（系统里没有这个代理）")
+            continue
+        r = rosters.get(x["agent_code"])
+        if r and r.get("file") in z.namelist():
+            a = vault.get("agent", a["id"])
+            a["roster"] = {"name": r.get("name") or os.path.basename(r["file"]), "fid": vault.put_file(z.read(r["file"])),
+                           "updated": today, "agent_label": x.get("agent_label", "")}
+            vault.put("agent", a)
+        elif x.get("agent_label"):
+            a = vault.get("agent", a["id"])
+            a["roster"] = dict(a.get("roster") or {}, agent_label=x["agent_label"])
+            vault.put("agent", a)
+        if x["locked"]:
+            skipped.append(f"{a['name']}（{x['term']} 结算单已经发出，没有改）")
+            continue
+        c = x["existing"] or {"agent_id": a["id"], "term": x["term"], "status": "草稿", "students": [],
+                              "term_order": orders.get(x["term"], len(orders) + 100)}
+        if x["term"] not in orders:
+            vault.put("term", {"name": x["term"], "order": max([0] + [t.get("order", 0) for t in vault.all("term")]
+                                                                + [k.get("term_order", 0) for k in vault.all("commission")]) + 1,
+                               "created": today})
+            orders = {t: i for i, t in enumerate(terms())}
+        keep = [s2 for s2 in c.get("students", []) if all(_name_key(s2.get("name")) != _name_key(n) for n in x["students"])]
+        add = []
+        for n in x["students"]:
+            st = by_name.get(n) or {}
+            add.append({"name": st.get("name") or n, "program": st.get("program") or "FT1", "courses": st.get("courses") or "",
+                        "origin": st.get("origin") or "International", "tuition": st.get("tuition") or 0,
+                        "note": "", "period": st.get("roster_note") or st.get("period") or "", "rate": None,
+                        "grade": st.get("grade") or "", "student_id": st.get("id")})
+        c["students"] = keep + add
+        c["imported"] = False
+        c["draft_mail"] = {k: v for k, v in {"greet": x.get("greet"), "to": x.get("to")}.items() if v}
+        c = vault.put("commission", c)
+        for n in x["students"]:
+            if by_name.get(n):
+                by_name[n]["commission_id"] = c["id"]
+                vault.put("student", by_name[n])
+        n_stmt += 1
+    return n_new, n_upd, n_stmt, skipped
+
+
 @app.route("/inbox")
 @login_required
 def inbox_page():
@@ -1969,7 +2194,13 @@ def inbox_page():
                     wb = openpyxl.load_workbook(io.BytesIO(z.read("tracker.xlsx")), read_only=True)
                     tracker_n = sum(max(ws.max_row - 1, 0) for ws in wb.worksheets)
                 cf = _contract_files(z)
-                pv = {"agents": agents, "rows": len(records), "contracts": cf,
+                if "students.json" in names:
+                    spack, srows, sstmts = _students_pack(z)
+                    spv = {"pack": spack, "rows": srows, "stmts": sstmts,
+                           "agents": agents_by_id()}
+                else:
+                    spv = None
+                pv = {"agents": agents, "rows": len(records), "contracts": cf, "students": spv,
                       "matched": sum(1 for c in cf if c[1]), "tracker_n": tracker_n,
                       "terms": sorted({r["term"] for r in records}, key=lambda t: next(
                           (r["term_order"] for r in records if r["term"] == t), 0))}
@@ -1981,7 +2212,9 @@ def inbox_page():
 @app.post("/inbox/<name>/import")
 @login_required
 def inbox_import(name):
-    if vault.all("agent") and request.form.get("confirm") != "1":
+    with inbox.open_bundle(vault, name) as z:
+        has_workbook = "workbook.xlsx" in z.namelist()
+    if has_workbook and vault.all("agent") and request.form.get("confirm") != "1":
         flash("系统里已经有代理了，再导入会重复。确实要导入请勾选「我确认要再次导入」")
         return redirect(url_for("inbox_page", b=name))
     try:
@@ -1996,13 +2229,17 @@ def inbox_import(name):
                 msg.append(f"{n_agents} 个代理、{n_rows} 条历史佣金、{len(fids)} 份已签合同")
             if "tracker.xlsx" in z.namelist():
                 msg.append(f"{import_tracker(z.read('tracker.xlsx'))} 个潜在代理")
+            if "students.json" in z.namelist():
+                n_new, n_upd, n_stmt, skipped = _students_import(z)
+                msg.append(f"学生新增 {n_new} 名、更新 {n_upd} 名，{n_stmt} 张结算单草稿（含邮件和附件草稿，都没有发出）"
+                           + ("；没建结算单：" + "、".join(skipped) if skipped else ""))
     except Exception as e:
         flash(f"导入失败：{e}")
         return redirect(url_for("inbox_page", b=name))
     inbox.remove(vault, name)
     vault.audit("inbox bundle imported")
-    flash("已导入：" + "，".join(msg) + "。收件箱里的加密包已删除。请检查，不对的代理可以在「编辑」里删除。")
-    return redirect(url_for("agents_list"))
+    flash("已导入：" + "，".join(msg) + "。收件箱里的加密包已删除。请检查，不对的可以直接改。")
+    return redirect(url_for("agents_list") if has_workbook else url_for("students"))
 
 
 @app.post("/inbox/<name>/delete")

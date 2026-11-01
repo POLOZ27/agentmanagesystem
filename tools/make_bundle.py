@@ -1,4 +1,6 @@
 """把资料打成加密收件箱的包：python tools/make_bundle.py <inbox.pub> <输出目录> <包名> --workbook X.xlsx --contracts 目录 [--tracker Y.xlsx]
+学生包：python tools/make_bundle.py <inbox.pub> <输出目录> <包名> --students students.json
+  students.json 里 rosters 每项的 "src" 是本机上的 Student Roster 路径，打包时放进 rosters/<代理编号>.xlsx。
 
 输出 <包名>.json + <包名>.part001…（每份不超过 --chunk MB），拷到服务器 <数据目录>/inbox/ 即可。
 """
@@ -15,7 +17,7 @@ import inbox  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("pub"), ap.add_argument("out"), ap.add_argument("name")
-ap.add_argument("--workbook"), ap.add_argument("--contracts"), ap.add_argument("--tracker")
+ap.add_argument("--workbook"), ap.add_argument("--contracts"), ap.add_argument("--tracker"), ap.add_argument("--students")
 ap.add_argument("--chunk", type=int, default=25)
 a = ap.parse_args()
 
@@ -25,6 +27,14 @@ with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
         z.write(a.workbook, "workbook.xlsx")
     if a.tracker:
         z.write(a.tracker, "tracker.xlsx")
+    if a.students:
+        pack = json.load(open(a.students, encoding="utf-8"))
+        for code, r in (pack.get("rosters") or {}).items():
+            src = r.pop("src", None)
+            if src:
+                r["file"] = f"rosters/{code}.xlsx"
+                z.write(src, r["file"])
+        z.writestr("students.json", json.dumps(pack, ensure_ascii=False, indent=1))
     if a.contracts:
         for f in sorted(os.listdir(a.contracts)):
             p = os.path.join(a.contracts, f)

@@ -6,12 +6,13 @@
 
 {% if c.id %}<div class="card"><h2>下一步</h2>
 {% if stage == '草稿' %}
-<p class="small mute">检查下面的学生明细和佣金金额，确认无误后发给代理。发出后金额锁定，对账单 Excel 作为附件。</p>
-<div class="inline"><a class="btn ghost" href="{{ url_for('commission_statement', cid=c.id) }}">下载对账单 Excel</a>
-<form method="post" action="{{ url_for('commission_send', cid=c.id) }}" onsubmit="return confirm('把 {{ c.calc|money }} 的结算单发给 {{ c.agent.email }}？')"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn" {{ 'disabled' if not c.agent.email or not c.lines }}>发结算单给代理{% if c.agent.email %}（{{ c.agent.email }}）{% endif %}</button></form></div>
-{% if not c.agent.email %}<p class="small" style="color:var(--bad)">这个代理还没有邮箱。</p>{% endif %}
+<p class="small mute">检查下面的学生明细和佣金金额，然后打开预览：邮件正文可以改，附件是代理的 Student Roster（以前所有学期 + 本学期新加的工作表），每个工作表都能直接看。确认后在预览页发出，发出后金额锁定。</p>
+<div class="inline"><a class="btn" href="{{ url_for('commission_mail', cid=c.id) }}">预览邮件和附件{% if c.agent.email or c.draft_mail %}，再发出{% endif %}</a>
+<a class="btn ghost" href="{{ url_for('commission_roster', cid=c.id) }}">下载附件 Excel</a>
+<a class="btn ghost" href="{{ url_for('commission_statement', cid=c.id) }}">下载系统对账单</a></div>
+{% if not c.agent.email and not (c.draft_mail or {}).get('to') %}<p class="small" style="color:var(--bad)">这个代理还没有邮箱，可以在预览页直接填收件人。</p>{% endif %}
 {% elif stage == '已发结算单' %}
-<p class="small mute">{{ c.sent_on }} 已发给代理。代理回信确认后，在这里登记（可以直接选收件箱里代理发来的发票附件）。</p>
+<p class="small mute">{{ c.sent_on }} 已发给代理{% if c.sent_file %}（<a href="{{ url_for('commission_mail', cid=c.id) }}">看发出的邮件和附件</a>）{% endif %}。代理回信确认后，在这里登记（可以直接选收件箱里代理发来的发票附件）。</p>
 <form method="post" enctype="multipart/form-data" action="{{ url_for('commission_confirm', cid=c.id) }}" class="inline"><input type="hidden" name="_csrf" value="{{ csrf }}">
 {% if inbound %}<div style="flex:2"><label>代理来信里的附件</label><select name="from_mail"><option value="">（不选）</option>{% for m, f in inbound %}<option value="{{ f.name }}|{{ f.fid }}">{{ f.name }} · {{ m.subject }} · {{ m.at[:10] }}</option>{% endfor %}</select></div>{% endif %}
 <div style="flex:2"><label>或上传发票</label><input type="file" name="invoice"></div><div><button class="btn">代理已确认</button></div></form>

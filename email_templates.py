@@ -23,6 +23,26 @@ Polo Zhang
 Johnathan Academy""",
 }
 
+# 发 Student Roster（以前所有学期 + 本学期新工作表）时用：Agent\Template Docs\Service Commission Email.docx 原文
+COMMISSION_ROSTER = {
+    "subject": "JA Commission Records for {term}",
+    "body": """Dear {agent},
+
+I trust this email finds you well.
+
+As we continue to nurture our fruitful collaboration, I am writing to share with you the commission records for students enrolled at Johnathan Academy through your esteemed agency for the period of {term}.
+
+We would greatly appreciate it if you could review and confirm these records at your earliest convenience. Please do not hesitate to reach out if you have any questions or require further clarification on any aspects of the document.
+
+I also want to express our sincere gratitude for your continued cooperation and hard work. The success of our students is a testament to the strong partnership we have formed, and we look forward to many more years of collaborative achievement.
+
+Thank you once again for your valued partnership. We eagerly await your confirmation of the commission records. If everything is correct, please send us the invoice for the corresponding amount.
+
+Best Regards,
+Polo Zhang
+Johnathan Academy""",
+}
+
 ACCOUNTANT = {
     "subject": "Commission payment request – {agent} ({code}) – {term} – {amount}",
     "body": """Hi,
