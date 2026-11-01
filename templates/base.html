@@ -1,6 +1,6 @@
 <!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block title %}代理管理{% endblock %} · Agent Portal</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head><body>
-{% if session.ok %}<div class="top"><b>Johnathan Academy · 代理管理</b><nav>
+<title>{% block title %}代理管理{% endblock %} · Agent Portal</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"><link rel="icon" href="{{ url_for('static', filename='favicon.png') }}"></head><body>
+{% if session.ok %}<div class="top"><a class="brandmark" href="{{ url_for('dashboard') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Johnathan Academy"><span><b>Johnathan Academy</b><small>代理管理 · Agent Portal</small></span></a><nav>
 {% set ep = request.endpoint or '' %}
 <a href="{{ url_for('dashboard') }}" class="{{ 'on' if ep=='dashboard' }}">总览</a>
 <a href="{{ url_for('agents_list') }}" class="{{ 'on' if ep.startswith('agent') or ep=='renewals' }}">代理</a>
