@@ -28,6 +28,7 @@
 {% if not c.locked %}<div class="card"><h2>发出</h2>
 <p>佣金合计 <b>{{ c.calc|money }}</b> · {{ c.students|length }} 名学生 · 收件人 {{ m.to or '（还没填）' }}</p>
 <form method="post" action="{{ url_for('commission_send', cid=c.id) }}" onsubmit="return confirm('确认把邮件和附件发给 {{ m.to }}？发出后金额锁定。')"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div class="grid">{% with kind = "statement" %}{% include "_sender.html" %}{% endwith %}</div>
 <button class="btn" {{ 'disabled' if not m.to or not c.lines }}>确认发出</button> <span class="small mute">先点上面的「保存修改」再发；没保存的改动不会发出</span></form></div>{% endif %}
 <script>document.querySelectorAll('.sheet-tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.sheet').forEach(d=>d.style.display=d.dataset.i===b.dataset.i?'':'none');document.querySelectorAll('.sheet-tab').forEach(x=>x.classList.toggle('ghost',x!==b));});</script>
 {% endblock %}

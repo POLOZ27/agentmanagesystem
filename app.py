@@ -874,13 +874,13 @@ def statement_mail(c, a, e):
             "to": d.get("to") or a.get("email") or ""}
 
 
-def send_statement(c, agents, box):
+def send_statement(c, agents, box, sender=None):
     """第 1 步：锁定金额，发结算邮件给代理。附件是代理的 Student Roster（以前所有学期 + 本学期新工作表）。"""
     e, name, data = roster_attachment(c, agents)
     a = e["agent"]
     m = statement_mail(c, a, e)
     box.send(m["to"], m["subject"], m["body"], [(name, data)], agent_id=a.get("id"), kind="statement",
-             commission_id=c["id"])
+             sender=sender, commission_id=c["id"])
     c["locked"] = {"lines": e["lines"], "total": e["calc"], "y1_rate": y1_rate_used(e["scheme"], ay_group(c), c)}
     for prior in ay_group(c):  # 本单已包含补差，之前的单子不再重复补
         if prior["id"] != c["id"] and prior.get("locked") and any(l.get("kind") == "TOPUP" for l in e["lines"]):
@@ -910,7 +910,7 @@ def commission_send(cid):
         flash("这个代理还没有邮箱，先在预览页填收件人，或到代理资料里补上")
         return redirect(url_for("commission_mail", cid=cid))
     with mailer.Outbox(vault) as box:
-        send_statement(c, agents, box)
+        send_statement(c, agents, box, sender=request.form.get("sender") or None)
     flash("结算邮件和 Student Roster 已发给代理，等代理确认并回发票")
     return redirect(url_for("commission_edit", cid=cid))
 
