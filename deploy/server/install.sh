@@ -47,6 +47,7 @@ fi
 # 官网入学申请（只读账号，由 setup-admissions.sh 生成）
 if [ -f .env.admissions ]; then set -a; . ./.env.admissions; set +a; echo "官网入学申请：已配置只读连接"; fi
 if [ -f .env.mail ]; then set -a; . ./.env.mail; set +a; echo "应用权限发信：已配置"; fi
+if [ -f .env.apfeed ]; then set -a; . ./.env.apfeed; set +a; echo "AP 学分课程名单：已配置"; fi
 sed -e "s|SITES|$SITES|" -e "s|DEFAULT_IP|${IP:-localhost}|" Caddyfile.tmpl > Caddyfile
 echo "这次要装合同预览组件（LibreOffice），第一次构建会多花几分钟……"
 docker compose up -d --build

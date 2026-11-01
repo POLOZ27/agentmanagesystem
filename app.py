@@ -15,6 +15,7 @@ from flask import (Flask, abort, flash, redirect, render_template, request, send
 import threading
 
 import admissions
+import ap_courses
 import ai
 import portal
 import backup
@@ -1451,15 +1452,23 @@ _adm_last = {"at": 0, "result": None, "error": None}
 
 def sync_admissions(force=False):
     """同步官网入学申请（最多每 10 分钟一次，除非手动点「立即同步」）。"""
-    if not admissions.enabled() or (not force and time.time() - _adm_last["at"] < 600):
+    if not (admissions.enabled() or ap_courses.enabled()) or (not force and time.time() - _adm_last["at"] < 600):
         return _adm_last
     _adm_last["at"] = time.time()
-    try:
-        _adm_last.update(result=admissions.sync(vault, STUDENT_STAGES), error=None)
-        if _adm_last["result"]["new"]:
-            vault.audit(f"admissions sync: {_adm_last['result']['new']} new")
-    except Exception as e:  # noqa: BLE001  官网数据库连不上不影响代理系统
-        _adm_last["error"] = f"{type(e).__name__}: {e}"[:200]
+    if admissions.enabled():
+        try:
+            _adm_last.update(result=admissions.sync(vault, STUDENT_STAGES), error=None)
+            if _adm_last["result"]["new"]:
+                vault.audit(f"admissions sync: {_adm_last['result']['new']} new")
+        except Exception as e:  # noqa: BLE001  官网数据库连不上不影响代理系统
+            _adm_last["error"] = f"{type(e).__name__}: {e}"[:200]
+    if ap_courses.enabled():
+        try:
+            r = ap_courses.sync(vault)
+            if r["new"]:
+                vault.audit(f"AP courses sync: {r['new']} new")
+        except Exception as e:  # noqa: BLE001  AP 系统连不上不影响代理系统
+            app.logger.warning("AP courses sync failed: %s", e)
     return _adm_last
 
 
