@@ -728,8 +728,11 @@ def commissions():
     comms = vault.all("commission")
     rows = sorted([enrich(c, agents, comms) for c in comms if c["term"] == term],
                   key=lambda r: (STAGES.index(r["stage"]) if r["stage"] in STAGES else 9, r["agent"].get("code") or ""))
+    cfg = settings()
     return render_template("commissions.html", terms=ts, term=term, rows=rows, suggest=next_terms(ts),
-                           total=sum(r["amount"] for r in rows), fees=sum(r["fees"] for r in rows))
+                           total=sum(r["amount"] for r in rows), fees=sum(r["fees"] for r in rows),
+                           master_name=cfg.get("master_base_name") if cfg.get("master_base") else None,
+                           accountant=cfg.get("accountant_email"))
 
 
 @app.post("/commissions/terms")
@@ -1097,6 +1100,65 @@ def commissions_export():
     buf.seek(0)
     vault.audit("commission export")
     return send_file(buf, download_name=f"Commission {ws.title}.xlsx", as_attachment=True)
+
+
+def _master(term):
+    """佣金总表：在上一次的总表（POLO 原来的《代理表》）后面加上这个结算期的一页，所有代理都列上。
+    生成后存成新的底表，下一个结算期接着加。返回 (文件名, 字节)。"""
+    agents = agents_by_id()
+    comms = vault.all("commission")
+    mine = {c["agent_id"]: enrich(c, agents, comms) for c in comms if c["term"] == term}
+    listed = [a for a in agents.values() if a.get("status") == "活跃" or a["id"] in mine]
+    rows = [statements.master_row(a, mine.get(a["id"]), a.get("scheme_text") or scheme_label(a))
+            for a in sorted(listed, key=lambda a: (a.get("code") or "J9", a.get("name") or ""))]
+    cfg = settings()
+    base = vault.get_file(cfg["master_base"]) if cfg.get("master_base") else None
+    data = statements.master_workbook(base, term, rows)
+    rec = vault.get("settings", "mail") or {"id": "mail"}
+    rec["master_base"] = vault.put_file(data)
+    vault.put("settings", rec)
+    return f"代理表 Commission {statements.sheet_title(term)} {dt.date.today().isoformat()}.xlsx", data
+
+
+@app.route("/commissions/master.xlsx")
+@login_required
+def commissions_master():
+    fname, data = _master(request.args["term"])
+    vault.audit("commission master workbook")
+    return send_file(io.BytesIO(data), download_name=fname, as_attachment=True)
+
+
+@app.post("/commissions/master/base")
+@login_required
+def commissions_master_base():
+    f = request.files.get("file")
+    if not f or not f.filename.lower().endswith(".xlsx"):
+        flash("请选择《代理表》Excel（.xlsx）")
+    else:
+        rec = vault.get("settings", "mail") or {"id": "mail"}
+        rec["master_base"] = vault.put_file(f.read())
+        rec["master_base_name"] = os.path.basename(f.filename)
+        vault.put("settings", rec)
+        flash(f"已把 {rec['master_base_name']} 设为总表底表，以后每个结算期在它后面加一页")
+    return redirect(url_for("commissions", term=request.form.get("term") or None))
+
+
+@app.post("/commissions/master/send")
+@login_required
+def commissions_master_send():
+    term = request.form["term"]
+    cfg = settings()
+    if not cfg.get("accountant_email"):
+        flash("请先在「设置 → 结算与 AI」里填会计邮箱")
+        return redirect(url_for("commissions", term=term))
+    fname, data = _master(term)
+    with mailer.Outbox(vault) as box:
+        box.send(cfg["accountant_email"], f"Johnathan Academy agent commissions – {term}",
+                 f"Hi,\n\nAttached is the agent commission summary with the {term} sheet added "
+                 "(one row per agent, with payment details).\n\nThank you,\nPolo",
+                 [(fname, data)], kind="accountant", sender=request.form.get("sender"))
+    flash(f"总表（{term}）已发给会计 {cfg['accountant_email']}")
+    return redirect(url_for("commissions", term=term))
 
 
 # ---------- 开发新代理 ----------
@@ -2041,6 +2103,11 @@ def settings_import():
         wb.save(tmp.name)
         try:
             n_agents, n_rows = importer.import_into(vault, tmp.name, contract_fids=fids)
+            rec = vault.get("settings", "mail") or {"id": "mail"}
+            with open(tmp.name, "rb") as fh:  # 原表留作佣金总表的底表，以后每个结算期在后面加一页
+                rec["master_base"] = vault.put_file(fh.read())
+            rec["master_base_name"] = os.path.basename(wb.filename)
+            vault.put("settings", rec)
         except Exception as e:
             flash(f"导入失败：{e}")
             return redirect(url_for("settings_page"))

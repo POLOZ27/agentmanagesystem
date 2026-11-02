@@ -2,7 +2,7 @@
 <form class="toolbar" style="flex-wrap:wrap"><label style="margin:0">学期</label><select name="term" onchange="this.form.submit()">{% for t in terms|reverse %}<option {{ 'selected' if t==term }}>{{ t }}</option>{% endfor %}</select>
 <a class="btn ghost small" href="#" onclick="document.getElementById('newterm').hidden=!document.getElementById('newterm').hidden;return false">+ 新建学期</a>
 {% if term and not rows %}<button class="btn ghost small" form="delterm" onclick="return confirm('删除空学期「{{ term }}」？')">删除这个空学期</button>{% endif %}
-<span style="flex:1"></span><a class="btn ghost" href="{{ url_for('commissions_export', term=term) }}">导出 Excel</a><a class="btn" href="{{ url_for('commission_edit', term=term) }}">+ 新结算单</a></form>
+<span style="flex:1"></span><a class="btn ghost" href="{{ url_for('commissions_master', term=term) }}" title="在《代理表》后面加上这个结算期的一页，所有代理都列上">下载总表</a><a class="btn ghost" href="{{ url_for('commissions_export', term=term) }}">导出本期 Excel</a><a class="btn" href="{{ url_for('commission_edit', term=term) }}">+ 新结算单</a></form>
 <form method="post" action="{{ url_for('term_create') }}" id="newterm" class="card toolbar" style="flex-wrap:wrap" hidden><input type="hidden" name="_csrf" value="{{ csrf }}">
 <label style="margin:0">新学期名称</label><input name="name" list="termsug" required placeholder="例如 {{ suggest[0] if suggest else 'Sep-Dec Fall 26-27' }}" style="min-width:240px">
 <datalist id="termsug">{% for t in suggest %}<option>{{ t }}</option>{% endfor %}</datalist>
@@ -21,6 +21,11 @@
 {% if drafts %}<form method="post" action="{{ url_for('commission_send_all') }}" onsubmit="return confirm('给 {{ drafts|length }} 个代理发出本学期结算单？')"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="term" value="{{ term }}"><button class="btn">一键发出 {{ drafts|length }} 张草稿结算单</button></form>{% endif %}</div></div>
 <div class="row"><div class="card kpi"><div class="l">本学期已缴学费</div><div class="n">{{ fees|money or '$0' }}</div></div><div class="card kpi"><div class="l">本学期佣金合计</div><div class="n">{{ total|money or '$0' }}</div></div>
 <div class="card kpi"><div class="l">未付</div><div class="n">{{ rows|rejectattr('stage','equalto','已付')|rejectattr('stage','equalto','历史导入')|map(attribute='amount')|sum|money or '$0' }}</div></div></div>
+{% if term %}<div class="card"><h2>佣金总表（给会计付款用）</h2>
+<p class="small mute">在{{ '《' ~ master_name ~ '》' if master_name else '《代理表》' }}后面加上「{{ term }}」这一页：所有在合作的代理每人一行（这期没有学生的也列上），写明各类学生、已缴学费、佣金金额和收款方式。下载或发送后，这份就成为新的底表，下个结算期接着往后加。{% if not master_name %}还没有底表，第一次会新建一份；想接在原来的表后面，先在下面上传原表。{% endif %}</p>
+<div class="toolbar" style="flex-wrap:wrap"><a class="btn ghost" href="{{ url_for('commissions_master', term=term) }}">下载总表</a>
+<form method="post" action="{{ url_for('commissions_master_send') }}" class="inline" onsubmit="return confirm('把总表（{{ term }}）发给会计 {{ accountant or '' }}？')"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="term" value="{{ term }}">{% with kind = "accountant" %}{% include "_sender.html" %}{% endwith %}<button class="btn" {{ '' if accountant else 'disabled title=先在设置里填会计邮箱' }}>发给会计{{ ' ' ~ accountant if accountant }}</button></form>
+<span style="flex:1"></span><form method="post" enctype="multipart/form-data" action="{{ url_for('commissions_master_base') }}" class="inline"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="term" value="{{ term }}"><input type="file" name="file" accept=".xlsx" required style="max-width:220px"><button class="btn ghost">换底表</button></form></div></div>{% endif %}
 <div class="card" style="padding:0"><table><tr><th>编号</th><th>代理</th><th>等级 / 方案</th><th>学生</th><th class="r">已缴学费</th><th class="r">佣金</th><th>进度</th><th>付款方式</th><th></th></tr>
 {% for r in rows %}<tr><td class="mono small">{{ r.agent.code }}</td><td><a href="{{ url_for('agent_detail', aid=r.agent_id) }}">{{ r.agent.name }}</a></td>
 <td class="small">{{ scheme_label(r.agent) }}{% if r.agent.level and r.ft1_ay %}<div class="mute">本学年第一年学生 {{ r.ft1_ay }} 人{% if r.ft1_ay >= 6 %} · 已达高档{% endif %}</div>{% endif %}</td>

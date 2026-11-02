@@ -290,3 +290,110 @@ def preview(data, max_rows=60):
             rows.append(cells)
         out.append({"title": ws.title, "rows": rows, "more": n_rows > max_rows})
     return out
+
+
+# ---------- 佣金总表（POLO 原来的《代理表》：每个结算期一个工作表，发给会计付款） ----------
+MASTER_HEAD = ["代理名称", "代理编号", "Commission %", "学期缴费全日制学生", "学期已缴费用", "全日制学生 Year One",
+               "全日制学生 Year Two", "全日制学生 Year Three", "全日制学生已缴费用", "兼职学生15%", "兼职学生已缴费用",
+               "AP 课程", "AP 返佣比例", "AP 已缴费用", "已缴学费总金额", "其它", "Commission 金额",
+               "E-Transfer address", "支票抬头", "Detail"]
+_FT = {"FT1": "全日制学生 Year One", "FT2": "全日制学生 Year Two", "FT3": "全日制学生 Year Three"}
+
+
+def _who(students):
+    """几个学生 + 年级，和原来表里的写法一样，例如 2 G10 G11。"""
+    if not students:
+        return None
+    grades = [f"G{str(s.get('grade')).strip().upper().lstrip('G')}" for s in students if s.get("grade")]
+    return " ".join([str(len(students))] + grades)
+
+
+def master_row(agent, c, scheme_text):
+    """一个代理在一个结算期的一行。c：enrich 过的结算单，没有就 None（这个结算期没有学生，照样列出来）。"""
+    row = {"代理名称": agent.get("name"), "代理编号": agent.get("code"), "Commission %": scheme_text,
+           "E-Transfer address": agent.get("etransfer"), "支票抬头": agent.get("payee"), "Detail": agent.get("detail")}
+    if not c:
+        return row, None
+    by = {}
+    for st in c.get("students", []):
+        by.setdefault(st.get("program"), []).append(st)
+    for prog, col in _FT.items():
+        row[col] = _who(by.get(prog))
+    lines = c["lines"]
+    fee = lambda kinds, labels=(): round(sum(l["fee"] or 0 for l in lines
+                                             if l.get("kind") in kinds or l["label"] in labels), 2) or None
+    row["全日制学生已缴费用"] = fee(("FT1", "FT2", "FT3"), ("全日制 Year One", "全日制 Year Two", "全日制 Year Three"))
+    row["学期已缴费用"] = fee((), ("学期缴费全日制",))
+    row["兼职学生15%"] = _who(by.get("PT")) or c.get("stu_pt")
+    row["兼职学生已缴费用"] = fee(("PT",), ("兼职学生",))
+    row["AP 课程"] = _who(by.get("AP")) or c.get("stu_ap")
+    ap_rates = sorted({l["rate"] for l in lines if l.get("kind") == "AP" or l["label"] == "AP 课程"})
+    row["AP 返佣比例"] = ", ".join(f"{r:g}%" for r in ap_rates) or None
+    row["AP 已缴费用"] = fee(("AP",), ("AP 课程",))
+    extra = round(sum(l["amount"] for l in lines if l.get("fee") is None), 2)
+    if extra:
+        row["其它"] = extra
+    return row, c["amount"]
+
+
+def master_workbook(base, term, rows, today=None):
+    """base：上一次的总表（字节，可为 None）。rows：[(行 dict, 佣金金额)]。
+    照最后一个结算期的工作表复制出新的一页（同名就替换），列按表头名字对上，所以老表多一列少一列都不怕。
+    已缴学费总金额和 Commission 金额写成公式，会计可以核对。"""
+    title = sheet_title(term)
+    wb = openpyxl.load_workbook(io.BytesIO(base)) if base else None
+    if wb:
+        tpl = next((ws for ws in reversed(wb.worksheets) if ws.title != title
+                    and any(str(c.value or "").strip() == "代理名称" for c in ws[1])), None)
+        idx = wb.sheetnames.index(title) if title in wb.sheetnames else len(wb.sheetnames)
+        if title in wb.sheetnames:
+            del wb[title]
+        if tpl is not None:
+            ws = wb.copy_worksheet(tpl)
+            ws.title = title
+            for row in ws.iter_rows(min_row=2):
+                for c in row:
+                    c.value = None
+        else:
+            ws = wb.create_sheet(title)
+            ws.append(MASTER_HEAD)
+        wb.move_sheet(ws, offset=idx - wb.sheetnames.index(title))
+        wb.active = wb.sheetnames.index(title)
+        for s in wb.worksheets:
+            s.sheet_view.tabSelected = s.title == title
+    else:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = title
+        ws.append(MASTER_HEAD)
+        for c in ws[1]:
+            c.font = Font(bold=True)
+            c.alignment = Alignment(wrap_text=True, vertical="top")
+        for i, w in enumerate((26, 12, 22, 10, 12, 14, 14, 14, 14, 12, 12, 10, 10, 12, 14, 10, 14, 28, 20, 20), 1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    col = {}
+    for c in ws[1]:
+        name = str(c.value or "").strip()
+        if name == "Commission 学费金额":
+            name = "Commission 金额"
+        if name and name not in col:
+            col[name] = c.column
+    for h in MASTER_HEAD:  # 老表缺的列补在后面
+        if h not in col:
+            col[h] = ws.max_column + 1
+            ws.cell(1, col[h]).value = h
+    L = lambda h: openpyxl.utils.get_column_letter(col[h])
+    fee_cols = [h for h in ("学期已缴费用", "全日制学生已缴费用", "兼职学生已缴费用", "AP 已缴费用")]
+    for r, (row, amount) in enumerate(rows, 2):
+        for h, v in row.items():
+            if h in col and v not in (None, ""):
+                ws.cell(r, col[h]).value = v
+        if amount is None:
+            continue
+        ws.cell(r, col["已缴学费总金额"]).value = "=" + "+".join(f"N({L(h)}{r})" for h in fee_cols)
+        ws.cell(r, col["Commission 金额"]).value = amount
+        for h in fee_cols + ["已缴学费总金额", "其它", "Commission 金额"]:
+            ws.cell(r, col[h]).number_format = MONEY_FMT
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
