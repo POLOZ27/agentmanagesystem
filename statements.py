@@ -333,7 +333,21 @@ def master_row(agent, c, scheme_text):
     extra = round(sum(l["amount"] for l in lines if l.get("fee") is None), 2)
     if extra:
         row["其它"] = extra
-    return row, c["amount"]
+    # Commission 金额照原表写成公式（例如 =I54*0.25+K54*0.15）：每一栏学费只有一个比例时才写得成
+    groups = {"学期已缴费用": ((), ("学期缴费全日制",)),
+              "全日制学生已缴费用": (("FT1", "FT2", "FT3"), ("全日制 Year One", "全日制 Year Two", "全日制 Year Three")),
+              "兼职学生已缴费用": (("PT",), ("兼职学生",)), "AP 已缴费用": (("AP",), ("AP 课程",))}
+    terms = []
+    for h, (kinds, labels) in groups.items():
+        rates = {l["rate"] for l in lines if l.get("fee") and (l.get("kind") in kinds or l["label"] in labels)}
+        if len(rates) > 1:
+            terms = None
+            break
+        if rates:
+            terms.append((h, rates.pop() / 100))
+    if terms is not None and extra:
+        terms.append(("其它", 1))
+    return row, (c["amount"], terms)
 
 
 def master_workbook(base, term, rows, today=None):
@@ -390,8 +404,11 @@ def master_workbook(base, term, rows, today=None):
                 ws.cell(r, col[h]).value = v
         if amount is None:
             continue
-        ws.cell(r, col["已缴学费总金额"]).value = "=" + "+".join(f"N({L(h)}{r})" for h in fee_cols)
-        ws.cell(r, col["Commission 金额"]).value = amount
+        amount, terms = amount if isinstance(amount, tuple) else (amount, None)
+        used = [h for h in fee_cols if row.get(h)]
+        ws.cell(r, col["已缴学费总金额"]).value = ("=" + "+".join(f"{L(h)}{r}" for h in used)) if used else None
+        ws.cell(r, col["Commission 金额"]).value = (
+            "=" + "+".join(f"{L(h)}{r}" if k == 1 else f"{L(h)}{r}*{k:g}" for h, k in terms) if terms else amount)
         for h in fee_cols + ["已缴学费总金额", "其它", "Commission 金额"]:
             ws.cell(r, col[h]).number_format = MONEY_FMT
     buf = io.BytesIO()
