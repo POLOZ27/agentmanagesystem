@@ -363,6 +363,16 @@ def master_workbook(base, term, rows, today=None):
         if title in wb.sheetnames:
             del wb[title]
         if tpl is not None:
+            # 代理的先后顺序照上一期，新代理排在后面
+            hdr = [str(c.value or "").strip() for c in tpl[1]]
+            ia, ib = hdr.index("代理名称"), hdr.index("代理编号") if "代理编号" in hdr else None
+            order = {}
+            for i, vals in enumerate(tpl.iter_rows(min_row=2, values_only=True)):
+                for k in (vals[ib] if ib is not None else None, vals[ia]):
+                    if k not in (None, ""):
+                        order.setdefault(str(k).strip(), i)
+            pos = lambda row: min(order.get(str(row[0].get(k) or "").strip(), 10 ** 6) for k in ("代理编号", "代理名称"))
+            rows = sorted(rows, key=pos)  # sorted 是稳定的：新代理之间保持原来的编号顺序
             ws = wb.copy_worksheet(tpl)
             ws.title = title
             for row in ws.iter_rows(min_row=2):
