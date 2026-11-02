@@ -334,7 +334,7 @@ app.jinja_env.filters["money"] = money
 app.jinja_env.globals.update(days_left=days_left, agent_scheme=agent_scheme, STATUSES=STATUSES, STAGES=STAGES, LEVELS=LEVELS, PROGRAMS=PROGRAMS,
                              ONBOARDING=ONBOARDING, onboarding_step=onboarding_step, PROSPECT_STAGES=PROSPECT_STAGES,
                              COUNTRY_ZH=i18n.COUNTRY_ZH, STUDENT_STAGES=STUDENT_STAGES, STUDENT_HINTS=STUDENT_HINTS,
-                             LANG_LABELS={k: v["label"] for k, v in i18n.TRANSLATIONS.items()}, lang_for=i18n.lang_for)
+                             LANG_LABELS=i18n.LANG_LABELS, lang_for=i18n.lang_for)
 
 
 def settings():
@@ -1255,7 +1255,7 @@ def _run_search(job_id, cfg, countries, n, extra):
     try:
         for country in countries:
             progress(f"正在搜索 {i18n.COUNTRY_ZH.get(country, country)}…")
-            for lead in ai.search_agencies(cfg, country, n, extra, exclude, i18n.lang_for(country), progress):
+            for lead in ai.search_agencies(cfg, country, n, extra, exclude, (i18n.lang_for(country) or "").split("-")[0] or None, progress):
                 vault.put("prospect", {**lead, "tier": lead.pop("size_tier", ""), "stage": "待审核",
                                        "source": f"AI 搜索（{ {'local': '本地', 'hybrid': '本地 + GPT'}.get(ai.mode(cfg), 'Claude')}）"
                                                  f" {dt.date.today().isoformat()}"})
@@ -1347,7 +1347,7 @@ def outreach():
     picked = [p for p in (vault.get("prospect", i) for i in ids) if p]
     if request.method == "POST" and request.form.get("go"):
         english = {"subject": request.form["subject"], "body": request.form["body"]}
-        custom = {k[3:]: {"label": i18n.TRANSLATIONS.get(k[3:], {}).get("label", k[3:]), "subject": "",
+        custom = {k[3:]: {"label": i18n.LANG_LABELS.get(k[3:], k[3:]), "subject": "",
                           "body": v} for k, v in request.form.items() if k.startswith("tr_") and v.strip()}
         sent = skipped = 0
         follow = request.form.get("kind") == "followup"
@@ -1355,6 +1355,7 @@ def outreach():
         if t and request.form.get("save_tpl"):
             t.update(subject=english["subject"], body=english["body"])
             t.setdefault("translations", {}).update({k: v["body"] for k, v in custom.items()})
+            t["edited"] = True
             vault.put("template", t)
         with mailer.Outbox(vault) as box:
             for p in picked:
@@ -1378,11 +1379,12 @@ def outreach():
     tpls = all_templates()
     mine = [t for t in tpls if t["kind"] == ("followup" if follow else "outreach")] or tpls
     tpl = next((t for t in tpls if t["id"] == request.args.get("tpl")), None) or \
+        next((t for t in mine if t.get("seed", "").startswith("promo-")), None) or \
         next((t for t in mine if "推荐" in t["name"]), mine[0])
-    labels = {k: v["label"] for k, v in i18n.TRANSLATIONS.items()}
+    labels = i18n.LANG_LABELS
     return render_template("outreach.html", picked=picked, english=tpl, langs=langs, kind="followup" if follow else "",
                            tpl=tpl, tpls=tpls,
-                           translations={l: {"label": labels.get(l, l), "body": tpl.get("translations", {}).get(l, "")}
+                           translations={l: {"label": labels.get(l, l), "body": i18n.translation_for(tpl, l)}
                                          for l in langs},
                            has_ai=ai.available(settings()), ai_mode=ai.mode(settings()))
 
@@ -1393,6 +1395,21 @@ def all_templates():
     if not ts:
         for t in i18n.DEFAULT_TEMPLATES:
             vault.put("template", json.loads(json.dumps(t)))
+        ts = vault.all("template")
+    flags = vault.get("settings", "flags") or {"id": "flags"}
+    if flags.get("promo_seeded") != i18n.PROMO_VERSION:
+        # 分阶段推广邮件：没有的补上，旧版本（还是系统原文的）更新；POLO 删掉或改过的不动
+        have = {t.get("seed"): t for t in ts if t.get("seed")}
+        for t in i18n.PROMO_TEMPLATES:
+            cur = have.get(t["seed"])
+            if cur is None and t["seed"] not in flags.get("promo_seen", []):
+                vault.put("template", json.loads(json.dumps(t)))
+            elif cur is not None and not cur.get("edited"):
+                cur.update(json.loads(json.dumps(t)))
+                vault.put("template", cur)
+        flags["promo_seen"] = sorted(set(flags.get("promo_seen", [])) | {t["seed"] for t in i18n.PROMO_TEMPLATES})
+        flags["promo_seeded"] = i18n.PROMO_VERSION
+        vault.put("settings", flags)
         ts = vault.all("template")
     return sorted(ts, key=lambda t: (t.get("kind") != "outreach", t.get("kind", ""), t["name"]))
 
@@ -1411,11 +1428,12 @@ def mail_templates(tid=None):
         t = t or {"translations": {}}
         for k in ("name", "kind", "subject", "body"):
             t[k] = request.form.get(k, "").strip()
+        t["edited"] = True
         t = vault.put("template", t)
         flash("模板已保存")
         return redirect(url_for("mail_templates", tid=t["id"]))
     return render_template("templates.html", tpls=tpls, t=t,
-                           labels={k: v["label"] for k, v in i18n.TRANSLATIONS.items()})
+                           labels=i18n.LANG_LABELS)
 
 
 @app.post("/prospects/translate")
@@ -1427,7 +1445,7 @@ def prospects_translate():
     lang = request.form["lang"]
     try:
         out = ai.translate(cfg, request.form["subject"], request.form["body"],
-                           i18n.TRANSLATIONS.get(lang, {}).get("label", lang))
+                           i18n.LANG_LABELS.get(lang, lang))
     except Exception as e:
         return {"error": str(e)[:300]}, 500
     return out
@@ -1840,7 +1858,7 @@ def agent_renew(aid):
 
 
 # 代理邮件可选的翻译语言：开发邮件的 14 种 + 老代理常见的几种
-AGENT_LANGS = {k: v["label"] for k, v in i18n.TRANSLATIONS.items()}
+AGENT_LANGS = dict(i18n.LANG_LABELS)
 AGENT_LANGS.update({"zh": "简体中文", "zh-TW": "繁體中文", "es": AGENT_LANGS.get("es", "Spanish"), "fr": "French",
                     "it": "Italian", "ru": "Russian", "ar": "Arabic", "id": "Indonesian", "mn": "Mongolian",
                     "kk": "Kazakh", "uk": "Ukrainian"})

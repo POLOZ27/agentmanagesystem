@@ -6,7 +6,7 @@
 
 COUNTRY_LANG = {
     "Czech Republic": "cs", "Czechia": "cs", "Slovakia": "sk", "Poland": "pl", "Hungary": "hu",
-    "Austria": "de", "Germany": "de", "Switzerland": "de", "Italy": "it", "San Marino": "it", "Turkey": "tr", "Türkiye": "tr", "Georgia": "ka", "Armenia": "hy",
+    "Austria": "de", "Germany": "de", "Switzerland": "de-CH", "Italy": "it", "San Marino": "it", "Turkey": "tr", "Türkiye": "tr", "Georgia": "ka", "Armenia": "hy",
     "Mexico": "es", "Colombia": "es", "Peru": "es", "Chile": "es", "Brazil": "pt",
     "Thailand": "th", "Vietnam": "vi", "South Korea": "ko", "Korea": "ko", "Japan": "ja",
 }
@@ -687,3 +687,31 @@ DEFAULT_TEMPLATES = [
     {"name": "跟进邮件", "kind": "followup", "subject": FOLLOWUP["subject"], "body": FOLLOWUP["body"],
      "translations": {k: v["body"] for k, v in FOLLOWUP_TRANSLATIONS.items()}},
 ]
+
+
+# ---------- 分阶段推广邮件（2026-11，POLO 审过；英文为正式版本，各语言自带标题） ----------
+import json as _json
+import os as _os
+
+_PROMO_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "promo_templates.json")
+with open(_PROMO_FILE, encoding="utf-8") as _f:
+    PROMO = _json.load(_f)
+PROMO_VERSION = PROMO["version"]
+# 语言切换用的名字（含 de-CH 瑞士德语）
+LANG_LABELS = {k: v["label"] for k, v in TRANSLATIONS.items()}
+LANG_LABELS.update(PROMO["labels"])
+_PROMO_KIND = {"outreach": "outreach", "followup1": "followup", "followup2": "followup",
+               "followup_last": "followup", "after_meeting": "followup", "intake_reminder": "agent"}
+PROMO_TEMPLATES = [
+    {"name": "推广 " + t["name"], "kind": _PROMO_KIND.get(t["kind"], "outreach"), "stage": t["kind"],
+     "seed": "promo-" + t["key"], "when": t["when"],
+     "subject": t["subject"]["en"], "body": t["body"]["en"],
+     "subjects": {l: v for l, v in t["subject"].items() if l != "en"},
+     "translations": {l: v for l, v in t["body"].items() if l != "en"}}
+    for t in PROMO["templates"]]
+
+
+def translation_for(tpl, lang):
+    """模板里某语言的正文；瑞士 de-CH 没有时用 de。"""
+    tr = tpl.get("translations") or {}
+    return tr.get(lang) or (tr.get(lang.split("-")[0], "") if lang else "")
