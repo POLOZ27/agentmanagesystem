@@ -4,14 +4,14 @@
 *{box-sizing:border-box}body{margin:0;font:14px/1.5 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink)}
 a{color:var(--brand);text-decoration:none}a:hover{text-decoration:underline}
 .top{display:flex;align-items:center;gap:24px;flex-wrap:wrap;background:#9b1b1b;color:#fff;padding:0 24px;min-height:60px}
-.brandmark{display:flex;align-items:center;gap:10px;color:#fff}.brandmark:hover{text-decoration:none}
+.brandmark{display:flex;align-items:center;gap:10px;color:#fff;white-space:nowrap}.brandmark:hover{text-decoration:none}
 .brandmark img{width:42px;height:42px;object-fit:contain;background:#fff;border-radius:50%;padding:3px}
 .brandmark span{display:flex;flex-direction:column;line-height:1.15}.brandmark b{font-family:Georgia,"Times New Roman",serif;font-size:17px;letter-spacing:.3px}
 .brandmark small{font-size:11px;opacity:.8}
 .loginlogo{display:block;width:84px;height:auto;margin:0 auto 8px}
-.top b{font-size:16px;letter-spacing:.5px}.top nav{display:flex;gap:4px;flex:1}
-.top nav a{color:#f3dada;padding:6px 12px;border-radius:6px}.top nav a.on,.top nav a:hover{background:rgba(255,255,255,.15);color:#fff;text-decoration:none}
-.top form{margin:0}.top .lockbtn{background:none;border:1px solid rgba(255,255,255,.4);color:#fff;padding:4px 10px;border-radius:6px;cursor:pointer}
+.top b{font-size:16px;letter-spacing:.5px}.top nav{display:flex;flex-wrap:wrap;gap:4px;flex:1;min-width:0}
+.top nav a{white-space:nowrap;color:#f3dada;padding:6px 12px;border-radius:6px}.top nav a.on,.top nav a:hover{background:rgba(255,255,255,.15);color:#fff;text-decoration:none}
+.top form{margin:0}.top .lockbtn{white-space:nowrap;background:none;border:1px solid rgba(255,255,255,.4);color:#fff;padding:4px 10px;border-radius:6px;cursor:pointer}
 main{max-width:1240px;margin:0 auto;padding:24px}
 h1{font-size:22px;margin:0 0 16px}h2{font-size:16px;margin:0 0 12px}
 .row{display:flex;gap:16px;flex-wrap:wrap}.row>*{flex:1;min-width:260px}
@@ -33,9 +33,11 @@ textarea{min-height:180px}label{display:block;font-size:12px;color:var(--mute);m
 .mute{color:var(--mute)}.small{font-size:12px}.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px}.toolbar input,.toolbar select{width:auto}
 .center{max-width:420px;margin:80px auto}.mono{font-family:ui-monospace,Consolas,monospace;word-break:break-all}
 .steps label{display:flex;gap:8px;align-items:center;color:var(--ink);font-size:14px;margin:6px 0}.steps input{width:auto}
-.calc td{border:0;padding:3px 8px}.lock-note{font-size:12px;color:#cfe0f0}
+.calc td{border:0;padding:3px 8px}.lock-note{font-size:12px;color:#f3dada}
 .tag{white-space:nowrap}
 .tablewrap{overflow-x:auto}
+/* 窄窗口：校名和锁定按钮一行，导航单独一行（自动换行，字不再竖着断开） */
+@media (max-width:1240px){.top{padding:8px 20px;gap:6px 16px}.brandmark{flex:1}.top nav{order:3;flex:1 1 100%;padding-bottom:4px}.lock-note{display:none}}
 @media (max-width:700px){main{padding:16px}.top{height:auto;padding:8px 16px;gap:8px}.top nav{flex-wrap:wrap;order:3;flex-basis:100%}.lock-note{display:none}.brandmark{flex:1}.row>*{min-width:100%}.toolbar{flex-wrap:wrap}}
 .card{overflow-x:auto}
 .flow{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 14px;padding:0;list-style:none;counter-reset:f}
@@ -57,3 +59,4 @@ textarea{min-height:180px}label{display:block;font-size:12px;color:var(--mute);m
 .backlink{display:inline-block;margin:0 0 10px;font-size:13px;color:var(--mute)}.backlink:hover{color:var(--brand)}
 [hidden]{display:none!important}
 .lv-premier{background:#e7dcff;color:#4b2a9a}.lv-standard{background:#dceeff;color:#1d4f8a}
+
