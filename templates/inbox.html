@@ -16,18 +16,28 @@
 {% for a in sp.agent_list %}<option value="{{ a.id }}" {{ 'selected' if x.agent and x.agent.id == a.id }}>{{ a.name }}{{ ' ' ~ a.code if a.code }}</option>{% endfor %}</select></td>
 <td><select name="pay_{{ x.i }}" form="importform" onchange="this.style.background=this.value===this.dataset.orig?'':'#e8f4ff'" data-orig="{{ '1' if x.pay0 else '0' }}"><option value="1" {{ 'selected' if x.pay }}>付</option><option value="0" {{ 'selected' if not x.pay }}>不付</option></select>{% if not x.pay and x.pay_note %}<div class="small mute" style="max-width:220px">{{ x.pay_note }}</div>{% endif %}</td>
 <td>{{ PROGRAMS.get(x.program, x.program) }}</td><td>{{ x.origin or '' }}</td><td class="r">{{ x.tuition|money if x.tuition else '' }}</td><td class="mute">{{ x.note or '' }}</td></tr>{% endfor %}</table></div>
-<h3>结算单草稿 {{ sp.stmts|length }} 张（只建草稿，不会发信）</h3>
-<p class="small mute">下表是按建议的代理排的；上面改了代理，导入时结算单会跟着按你选的代理建。</p>
-<table class="small"><tr><th>代理</th><th>学期</th><th>学生</th><th>附件底稿（以前的 Student Roster）</th><th></th></tr>
-{% for x in sp.stmts %}<tr{% if not x.agent or x.locked %} style="background:#fff4e0"{% endif %}><td>{{ x.agent.name if x.agent else (x.agent_hint or x.agent_code) }}</td><td>{{ x.term }}</td><td>{{ x.students|join('、') }}</td><td>{{ x.roster or '没有，附件只放本学期' }}</td>
-<td>{% if not x.agent %}系统里没有这个代理，不建{% elif x.locked %}这学期结算单已发出，不改{% elif x.existing %}合并进已有草稿{% else %}新建{% endif %}</td></tr>{% endfor %}</table>
+<h3 id="drafts">结算单草稿 {{ sp.stmts|length - (sp.stmts|selectattr('key','in',sp.skip)|list|length) }} 张（只建草稿，不会发信）</h3>
+{% if sp.refreshed %}<div class="flash">已按你上面的选择更新了草稿（还没有导入）。</div>{% endif %}
+<p class="small mute">上面改了代理或「付 / 不付」以后，点「按当前选择更新草稿」，这张表就会重新算。点代理名可以看每张草稿的学生和佣金估算（正式金额以导入后结算单为准）。勾「不建」的草稿，导入时就不会建。</p>
+<p id="refreshbar"{% if not sp.refreshed %} style="display:none"{% endif %}><button class="btn" form="importform" formaction="{{ url_for('inbox_refresh', name=sel) }}#drafts" name="refresh" value="1">按当前选择更新草稿</button>
+<span class="small mute" id="refreshhint">{% if not sp.refreshed %}上面有改动，下面的草稿还是旧的，请先更新。{% endif %}</span></p>
+<table class="small"><tr><th>代理</th><th>学期</th><th>学生</th><th class="r">佣金估算</th><th>附件底稿（以前的 Student Roster）</th><th></th><th>不建</th></tr>
+{% for x in sp.stmts %}{% set off = x.key in sp.skip %}<tr{% if off %} style="opacity:.5"{% elif not x.agent or x.locked %} style="background:#fff4e0"{% endif %}>
+<td><details><summary>{{ x.agent.name if x.agent else (x.agent_hint or x.agent_code) }}</summary>
+{% if x.lines %}<table class="small" style="margin:6px 0">{% for l in x.lines %}<tr><td>{{ l.student or l.label }}</td><td class="mute">{{ l.label }}</td><td class="r">{{ l.fee|money if l.fee }}</td><td class="r">{{ '%g'|format(l.rate) ~ '%' if l.rate is not none }}</td><td class="r">{{ l.amount|money }}</td></tr>{% endfor %}</table>
+{% else %}<p class="small mute">{% if x.agent %}没有本学期学费，金额为 0{% else %}系统里没有这个代理，算不了{% endif %}</p>{% endif %}
+{% if x.existing %}<p class="small mute">已有这学期的结算单，导入时这些学生合并进去。<a href="{{ url_for('commission_edit', cid=x.existing.id) }}" target="_blank">打开那张结算单</a></p>{% endif %}</details></td>
+<td>{{ x.term }}</td><td>{{ x.students|join('、') }}</td><td class="r">{{ x.total|money if x.agent }}</td><td>{{ x.roster or '没有，附件只放本学期' }}</td>
+<td>{% if off %}不建{% elif not x.agent %}系统里没有这个代理，不建{% elif x.locked %}这学期结算单已发出，不改{% elif x.existing %}合并进已有草稿{% else %}新建{% endif %}</td>
+<td>{% if x.agent and not x.locked %}<input type="checkbox" name="skip" value="{{ x.key }}" form="importform" {{ 'checked' if off }} onchange="this.closest('tr').style.opacity=this.checked?.5:1">{% endif %}</td></tr>{% endfor %}</table>
+<script>document.querySelectorAll('select[form=importform]').forEach(function(e){e.addEventListener('change',function(){var b=document.getElementById('refreshbar');b.style.display='';document.getElementById('refreshhint').textContent='上面有改动，下面的草稿还是旧的，请先更新。';});});</script>
 {% endif %}
 {% if pv.agents or pv.rows %}<p>代理 <b>{{ pv.agents|length }}</b> 个 · 历史佣金 <b>{{ pv.rows }}</b> 条（{{ pv.terms|first }} 到 {{ pv.terms|last }}，共 {{ pv.terms|length }} 个学期）· 已签合同 <b>{{ pv.contracts|length }}</b> 份（{{ pv.matched }} 份能按编号归到代理）{% if pv.tracker_n %} · 潜在代理名单约 <b>{{ pv.tracker_n }}</b> 行{% endif %}</p>
 {% if pv.agents|selectattr('pay_changed')|list %}<div class="flash">⚠️ 有代理的收款信息和系统里现有的不一样（下表标红），请逐个核对后再导入。</div>{% endif %}
 <table><tr><th>编号</th><th>代理</th><th>比例</th><th>E-transfer / 收款邮箱</th><th>支票抬头</th><th>银行 / 备注</th></tr>
 {% for a in pv.agents %}<tr{% if a.pay_changed %} style="background:#fde8e8"{% endif %}><td>{{ a.code or '—' }}</td><td>{{ a.name }}{% if a.exists %} <span class="tag">已存在</span>{% endif %}</td><td class="small">{{ a.scheme_text }}</td><td class="small">{{ a.etransfer or '' }}</td><td class="small">{{ a.payee or '' }}</td><td class="small">{{ a.detail or '' }}</td></tr>{% endfor %}</table>
 {% endif %}{% if pv.contracts %}<details><summary>合同文件（{{ pv.contracts|length }}）</summary><table>{% for n, code, exp, p in pv.contracts %}<tr><td class="small">{{ n }}</td><td>{{ code or '无编号，不导入' }}</td><td>{{ exp or '' }}</td></tr>{% endfor %}</table></details>{% endif %}
-<form method="post" id="importform" action="{{ url_for('inbox_import', name=sel) }}" onsubmit="this.querySelector('button').textContent='正在导入，请稍等…'"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<form method="post" id="importform" action="{{ url_for('inbox_import', name=sel) }}" onsubmit="var b=event.submitter;if(b&&b.name!=='refresh')b.textContent='正在导入，请稍等…'"><input type="hidden" name="_csrf" value="{{ csrf }}">
 {% if pv.agents or pv.rows %}<p class="small"><label style="display:inline"><input type="checkbox" name="confirm" value="1"> 我确认要再次导入（系统里已有代理时才需要）</label></p>{% endif %}
 <p><button class="btn">核对无误，导入</button></p></form>
 <form method="post" action="{{ url_for('inbox_delete', name=sel) }}" onsubmit="return confirm('删除这个包？不会导入任何内容。')"><input type="hidden" name="_csrf" value="{{ csrf }}"><button class="btn ghost">不导入，删除这个包</button></form></div>{% endif %}

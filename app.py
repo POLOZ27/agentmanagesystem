@@ -2216,14 +2216,19 @@ def _students_pack(z, choice=None, pays=None):
         meta = meta or {}
         cur = next((c for c in comms if a and c["agent_id"] == a["id"] and c["term"] == g["term"]), None)
         r = (pack.get("rosters") or {}).get(a.get("code")) if a else None
-        stmts.append(dict(meta, term=g["term"], students=g["students"], agent=a, agent_code=a.get("code") if a else None,
+        rows_g = [x for x in rows if x["name"] in g["students"]]
+        prev = {"students": [{"name": x["name"], "program": x.get("program") or "FT1", "tuition": x.get("tuition") or 0,
+                              "rate": None} for x in rows_g]}
+        lines, total = calculate(prev, agent_scheme(a)) if a else ([], 0)
+        stmts.append(dict(meta, key=str(key), lines=lines, total=total,
+                          term=g["term"], students=g["students"], agent=a, agent_code=a.get("code") if a else None,
                           agent_hint=g.get("agent_hint"), existing=cur, locked=bool(cur and cur.get("locked")),
                           roster=(r or {}).get("name") or ((a or {}).get("roster") or {}).get("name"), n=len(g["students"])))
     stmts.sort(key=lambda x: (x["agent"] is None, (x["agent"] or {}).get("code") or ""))
     return pack, rows, stmts
 
 
-def _students_import(z, choice=None, pays=None):
+def _students_import(z, choice=None, pays=None, skip=None):
     """导入学生（按名字合并，不重复）、归到代理、建本学期结算单草稿和邮件草稿、存各代理的 Roster 底稿。都不会发信。
     本学期不付佣金的学生只导入学生资料，不进结算单（已有的未发出草稿里有他，会拿掉）。"""
     pack, rows, stmts = _students_pack(z, choice, pays)
@@ -2274,6 +2279,9 @@ def _students_import(z, choice=None, pays=None):
     orders = {t: i for i, t in enumerate(terms())}
     for x in stmts:
         a = x["agent"]
+        if x["key"] in (skip or ()):
+            skipped.append(f"{(a or {}).get('name') or x.get('agent_hint') or x.get('agent_code')}（你选了不建）")
+            continue
         if not a:
             skipped.append(f"{x.get('agent_hint') or x.get('agent_code')}（系统里没有这个代理）")
             continue
@@ -2317,12 +2325,31 @@ def _students_import(z, choice=None, pays=None):
     return n_new, n_upd, n_stmt, skipped
 
 
+def _inbox_choices(form):
+    """预览页表单里的选择：每个学生的代理、付不付，以及不要建的草稿。"""
+    choice = {int(k[6:]): v for k, v in form.items() if k.startswith("agent_") and k[6:].isdigit()}
+    pays = {int(k[4:]): v for k, v in form.items() if k.startswith("pay_") and k[4:].isdigit()}
+    skip = set(form.getlist("skip"))
+    return choice, pays, skip
+
+
 @app.route("/inbox")
 @login_required
 def inbox_page():
     """加密收件箱：先预览包里的内容（特别是收款信息），确认后才导入。"""
+    return _inbox_render(request.args.get("b"))
+
+
+@app.post("/inbox/<name>/refresh")
+@login_required
+def inbox_refresh(name):
+    """按预览页里当前的选择重新算结算单草稿（不导入）。"""
+    return _inbox_render(name, *_inbox_choices(request.form), refreshed=True)
+
+
+def _inbox_render(sel, choice=None, pays=None, skip=None, refreshed=False):
     bs = inbox.bundles(vault)
-    sel = request.args.get("b") or next((b["name"] for b in bs if b["complete"]), None)
+    sel = sel or next((b["name"] for b in bs if b["complete"]), None)
     pv, err = None, None
     if sel and any(b["name"] == sel and b["complete"] for b in bs):
         try:
@@ -2348,8 +2375,8 @@ def inbox_page():
                     tracker_n = sum(max(ws.max_row - 1, 0) for ws in wb.worksheets)
                 cf = _contract_files(z)
                 if "students.json" in names:
-                    spack, srows, sstmts = _students_pack(z)
-                    spv = {"pack": spack, "rows": srows, "stmts": sstmts,
+                    spack, srows, sstmts = _students_pack(z, choice, pays)
+                    spv = {"pack": spack, "rows": srows, "stmts": sstmts, "skip": skip or set(), "refreshed": refreshed,
                            "agent_list": sorted(vault.all("agent"), key=lambda a: a.get("name", "").lower())}
                 else:
                     spv = None
@@ -2383,9 +2410,8 @@ def inbox_import(name):
             if "tracker.xlsx" in z.namelist():
                 msg.append(f"{import_tracker(z.read('tracker.xlsx'))} 个潜在代理")
             if "students.json" in z.namelist():
-                choice = {int(k[6:]): v for k, v in request.form.items() if k.startswith("agent_") and k[6:].isdigit()}
-                pays = {int(k[4:]): v for k, v in request.form.items() if k.startswith("pay_") and k[4:].isdigit()}
-                n_new, n_upd, n_stmt, skipped = _students_import(z, choice, pays)
+                choice, pays, skip = _inbox_choices(request.form)
+                n_new, n_upd, n_stmt, skipped = _students_import(z, choice, pays, skip)
                 msg.append(f"学生新增 {n_new} 名、更新 {n_upd} 名，{n_stmt} 张结算单草稿（含邮件和附件草稿，都没有发出）"
                            + ("；没建结算单：" + "、".join(skipped) if skipped else ""))
     except Exception as e:
