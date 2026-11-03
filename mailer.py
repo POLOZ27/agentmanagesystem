@@ -234,7 +234,9 @@ def settings(vault):
 def render(text, agent):
     return (text.replace("{代理名称}", agent.get("name", ""))
                 .replace("{代理编号}", agent.get("code") or "")
-                .replace("{联系人}", agent.get("contact") or agent.get("name", "")))
+                .replace("{联系人}", agent.get("contact") or agent.get("name", ""))
+                .replace("{name}", agent.get("contact") or agent.get("name", ""))
+                .replace("{agency}", agent.get("name", "")))
 
 
 class Outbox:

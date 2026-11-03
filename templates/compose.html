@@ -5,7 +5,8 @@
 <div><label>首次发送时间（定时用）</label><input type="datetime-local" name="send_at"></div>
 {% with kind = "news" %}{% include "_sender.html" %}{% endwith %}</div>
 <label>选定代理（「发给」选「选定代理」时生效，按住 Ctrl 多选）</label><select name="agent_ids" multiple size="6">{% for a in agents %}<option value="{{ a.id }}" {{ 'selected' if a.id==pre }}>{{ a.code or '' }} {{ a.name }} · {{ a.email }}</option>{% endfor %}</select>
-<label>主题</label><input name="subject" required value="Johnathan Academy 最新动态 | {代理名称}">
+<label>用模板（选了会替换下面的主题和正文）</label><select id="tplpick"><option value="">不用模板</option>{% for x in tpls %}<option value="{{ loop.index0 }}">{{ x.name }}</option>{% endfor %}</select>
+<label>主题</label><input name="subject" id="subj" required value="Johnathan Academy 最新动态 | {代理名称}">
 <div class="toolbar" style="margin:10px 0 0"><label style="margin:0">正文（可用 {代理名称} {代理编号} {联系人} 自动替换）</label><span style="flex:1"></span>
 <select id="kit" style="width:auto"><option value="">插入宣传资料链接…</option>{% for x in kit %}<option value="{{ x.title }}: {{ x.url }}">{{ x.kind }} · {{ x.title }}</option>{% endfor %}</select></div><textarea name="body" id="body" required>Dear {联系人},
 
@@ -21,4 +22,6 @@
 Best regards,
 Johnathan Academy</textarea>
 <p><button class="btn">确定</button></p></form>
-<script>document.getElementById('kit').addEventListener('change',function(){if(!this.value)return;const b=document.getElementById('body');const i=b.selectionStart||b.value.length;b.value=b.value.slice(0,i)+this.value+'\n'+b.value.slice(i);this.value='';b.focus();});</script>{% endblock %}
+<script>const TPLS={{ tpls|map(attribute='subject')|list|tojson }},TPLB={{ tpls|map(attribute='body')|list|tojson }};
+document.getElementById('tplpick').addEventListener('change',function(){if(this.value==='')return;const b=document.getElementById('body');if(b.value.trim()&&!confirm('用这个模板替换现在的主题和正文？')){this.value='';return;}document.getElementById('subj').value=TPLS[this.value]||'';b.value=TPLB[this.value]||'';});
+document.getElementById('kit').addEventListener('change',function(){if(!this.value)return;const b=document.getElementById('body');const i=b.selectionStart||b.value.length;b.value=b.value.slice(0,i)+this.value+'\n'+b.value.slice(i);this.value='';b.focus();});</script>{% endblock %}

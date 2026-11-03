@@ -1435,8 +1435,55 @@ def mail_templates(tid=None):
         t = vault.put("template", t)
         flash("模板已保存")
         return redirect(url_for("mail_templates", tid=t["id"]))
+    if t is None and not tid and request.args.get("new") != "1" and tpls:
+        t = tpls[0]  # 打开页面时直接显示第一个模板，不是空白的新建表单
     return render_template("templates.html", tpls=tpls, t=t,
                            labels=i18n.LANG_LABELS)
+
+
+def _docx_template(data, filename):
+    """把 Word 文件转成邮件模板：第一行如果是「Subject: …」或「主题：…」就当主题，否则用文件名；其余段落是正文。"""
+    import docx as _docx
+    d = _docx.Document(io.BytesIO(data))
+    paras = [p.text.rstrip() for p in d.paragraphs]
+    for tb in d.tables:  # 表格里的字也收进来（每行一段）
+        for row in tb.rows:
+            paras.append("  ".join(c.text.strip() for c in row.cells if c.text.strip()))
+    while paras and not paras[0].strip():
+        paras.pop(0)
+    base = os.path.splitext(os.path.basename(filename or "Word 模板"))[0]
+    subject = base
+    if paras:
+        m = re.match(r"^\s*(subject|主题|標題|标题)\s*[:：]\s*(.+)$", paras[0], re.I)
+        if m:
+            subject = m.group(2).strip()
+            paras.pop(0)
+            while paras and not paras[0].strip():
+                paras.pop(0)
+    body = re.sub(r"\n{3,}", "\n\n", "\n".join(paras)).strip()
+    return {"name": base, "subject": subject, "body": body, "translations": {}, "edited": True,
+            "source": filename}
+
+
+@app.post("/mail/templates/upload")
+@login_required
+def mail_templates_upload():
+    f = request.files.get("file")
+    if not f or not f.filename.lower().endswith(".docx"):
+        flash("请选一个 Word 文件（.docx）。旧的 .doc 请先在 Word 里「另存为」.docx")
+        return redirect(url_for("mail_templates"))
+    try:
+        t = _docx_template(f.read(), f.filename)
+    except Exception as e:
+        flash(f"读不了这个 Word 文件：{e}")
+        return redirect(url_for("mail_templates"))
+    if not t["body"]:
+        flash("这个 Word 文件里没有文字")
+        return redirect(url_for("mail_templates"))
+    t["kind"] = request.form.get("kind") or "outreach"
+    t = vault.put("template", t)
+    flash("已从 Word 生成模板，请核对主题和正文，有需要直接改了保存")
+    return redirect(url_for("mail_templates", tid=t["id"]))
 
 
 @app.post("/prospects/translate")
@@ -1485,7 +1532,7 @@ def compose():
         vault.put("campaign", c)
         flash("定时推送已创建")
         return redirect(url_for("mail"))
-    return render_template("compose.html", agents=agents, pre=request.args.get("agent"),
+    return render_template("compose.html", agents=agents, pre=request.args.get("agent"), tpls=all_templates(),
                            kit=[x for x in all_assets() if x.get("url") and x.get("share")])
 
 
