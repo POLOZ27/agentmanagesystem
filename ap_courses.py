@@ -1,6 +1,7 @@
 """从 AP 学分课程管理系统（同一台服务器上的 ap-courses 容器）读取中介推荐的学生，同步到「学生申请进度」。
 
 只读 /api/agent-feed：学生、课程、实收学费、中介信息，看不到家长、成绩等其他数据。地址和密钥由环境变量 AP_FEED_URL、AP_FEED_TOKEN 提供。
+AP 佣金每个学年单独结算：每个学年一条学生记录（入学学期 = 那个学年的秋季），学费只算那个学年交的。
 学费已到账的学生进度记为「已入学」，之后和其他学生一样一键加进结算单，佣金比例用 AP 系统按这家代理合同给的比例（10%、15% 或 0）。
 """
 import datetime as dt
@@ -42,49 +43,63 @@ def _intake(row):
     return admissions.intake_term(years[0], "Sep") if years else ""
 
 
+def year_rows(r):
+    """AP 佣金每个学年单独结算：AP 系统给了 years 就每个学年一条（第一学年的编号和以前一样），没给就按旧格式整个学生一条。"""
+    if "years" not in r:
+        return [{"key": r["ap_student_id"], "paid": r.get("tuition_paid") or 0, "intake": _intake(r), "year": "",
+                 "courses": "、".join(c["course"] for c in r.get("courses", []) if c.get("status") != "withdrawn")}]
+    return [{"key": y["ap_key"], "paid": y.get("tuition_paid") or 0, "year": y.get("academic_year") or "",
+             "intake": admissions.intake_term(y.get("academic_year"), "Sep") if y.get("academic_year") else _intake(r),
+             "courses": "、".join(y.get("courses") or [])} for y in r["years"]]
+
+
 def sync(vault, commissions_locked=None):
-    """新学生建记录；已有的只更新学费、课程和中介提示，不覆盖手动改过的代理。还没发出的结算单里的学费跟着更新。"""
+    """新学生建记录；已有的只更新学费、课程和中介提示，不覆盖手动改过的代理。还没发出的结算单里的学费跟着更新。
+    AP 学生每个学年一条记录（各自的入学学期和学费），各进那个学期的结算单；已锁定的结算单不动。"""
     rows = fetch()
     agents = vault.all("agent")
     push_agents(agents)
     known = {s["ap_id"]: s for s in vault.all("student") if s.get("ap_id")}
     new = updated = 0
     for r in rows:
-        courses = "、".join(c["course"] for c in r.get("courses", []) if c.get("status") != "withdrawn")
         hint = " · ".join(x for x in (r.get("agent_company"), r.get("agent_name"), r.get("agent_email")) if x)
-        paid = r.get("tuition_paid") or 0
-        st = known.get(r["ap_student_id"])
-        if st is None:
-            aid, how = _pick_agent(r, agents)
-            stage ="已入学" if paid > 0 else "收到申请"
-            vault.put("student", {"ap_id": r["ap_student_id"], "origin": "AP 学分课程", "name": r.get("name") or "",
-                                  "grade": re.sub(r"\D", "", str(r.get("grade") or "")), "intake": _intake(r), "program": "AP",
-                                  "courses": courses, "tuition": paid, "agent_id": aid or "", "agent_auto": how, "uses_agent": True,
-                                  "agent_hint": hint, "stage": stage, "history": {stage: dt.date.today().isoformat()},
-                                  "rate": (r.get("commission_rate") or 0) * 100})
-            new += 1
-            continue
-        changed = False
-        for k, v in (("tuition", paid), ("courses", courses), ("agent_hint", hint), ("rate", (r.get("commission_rate") or 0) * 100)):
-            if st.get(k) != v:
-                st[k] = v
+        for y in year_rows(r):
+            paid, courses = y["paid"], y["courses"]
+            st = known.get(y["key"])
+            if st is None:
+                aid, how = _pick_agent(r, agents)
+                stage = "已入学" if paid > 0 else "收到申请"
+                vault.put("student", {"ap_id": y["key"], "ap_year": y["year"], "origin": "AP 学分课程", "name": r.get("name") or "",
+                                      "grade": re.sub(r"\D", "", str(r.get("grade") or "")), "intake": y["intake"], "program": "AP",
+                                      "courses": courses, "tuition": paid, "agent_id": aid or "", "agent_auto": how, "uses_agent": True,
+                                      "agent_hint": hint, "stage": stage, "history": {stage: dt.date.today().isoformat()},
+                                      "rate": (r.get("commission_rate") or 0) * 100})
+                new += 1
+                continue
+            changed = False
+            for k, v in (("tuition", paid), ("courses", courses), ("agent_hint", hint), ("rate", (r.get("commission_rate") or 0) * 100)):
+                if st.get(k) != v:
+                    st[k] = v
+                    changed = True
+            if y["year"] and st.get("ap_year") != y["year"]:
+                st["ap_year"] = y["year"]
                 changed = True
-        if not st.get("agent_manual"):  # AP 系统里改了选择，这里跟着改；代理系统里手动分配过的不动
-            aid, how = _pick_agent(r, agents)
-            if aid and aid != st.get("agent_id") and (r.get("agent_id") or not st.get("agent_id")):
-                st.update(agent_id=aid, agent_auto=how)
+            if not st.get("agent_manual"):  # AP 系统里改了选择，这里跟着改；代理系统里手动分配过的不动
+                aid, how = _pick_agent(r, agents)
+                if aid and aid != st.get("agent_id") and (r.get("agent_id") or not st.get("agent_id")):
+                    st.update(agent_id=aid, agent_auto=how)
+                    changed = True
+            if paid > 0 and st.get("stage") == "收到申请":
+                st["stage"] = "已入学"
+                st.setdefault("history", {})["已入学"] = dt.date.today().isoformat()
                 changed = True
-        if paid > 0 and st.get("stage") == "收到申请":
-            st["stage"] = "已入学"
-            st.setdefault("history", {})["已入学"] = dt.date.today().isoformat()
-            changed = True
-        if changed:
-            vault.put("student", st)
-            updated += 1
-        c = vault.get("commission", st["commission_id"]) if st.get("commission_id") else None
-        if c and not c.get("locked"):
-            for row in c.get("students", []):
-                if row.get("student_id") == st["id"] and row.get("tuition") != paid:
-                    row["tuition"] = paid
-                    vault.put("commission", c)
+            if changed:
+                vault.put("student", st)
+                updated += 1
+            c = vault.get("commission", st["commission_id"]) if st.get("commission_id") else None
+            if c and not c.get("locked"):
+                for row in c.get("students", []):
+                    if row.get("student_id") == st["id"] and row.get("tuition") != paid:
+                        row["tuition"] = paid
+                        vault.put("commission", c)
     return {"new": new, "updated": updated}
