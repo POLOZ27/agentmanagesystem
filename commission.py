@@ -89,7 +89,7 @@ def _f(v):
 def ft1_count(statements):
     """同一学年第一年全日制学生人数（按学生去重：同一个学生两个学期都缴费只算 1 人）。"""
     return len({(st.get("name") or "").strip().lower() for s in statements for st in s.get("students", [])
-                if st.get("program") == "FT1"})
+                if st.get("program") == "FT1" and not st.get("nopay")})
 
 
 def calculate(rec, scheme, ay_statements=()):
@@ -115,6 +115,8 @@ def calculate(rec, scheme, ay_statements=()):
                           "amount": round(fee * pct / 100, 2)})
 
     for st in rec.get("students", []):
+        if st.get("nopay"):  # 本学期不付佣金（例如合同只付前两个学期、已付清）
+            continue
         pct = _f(st["rate"]) if st.get("rate") not in (None, "") else rate_for.get(st.get("program"), 0)
         add(PROGRAMS.get(st.get("program"), st.get("program")), st.get("tuition"), pct, st.get("name"), st.get("program"))
     # 旧数据（Excel 汇总）
@@ -132,7 +134,8 @@ def calculate(rec, scheme, ay_statements=()):
             if s is rec or not lk or s.get("topped_up_by") not in (None, rec.get("id")):
                 continue
             if lk.get("y1_rate", y1) < y1:
-                gap += sum(_f(st.get("tuition")) for st in s.get("students", []) if st.get("program") == "FT1") \
+                gap += sum(_f(st.get("tuition")) for st in s.get("students", [])
+                           if st.get("program") == "FT1" and not st.get("nopay")) \
                     * (y1 - lk["y1_rate"]) / 100
         if gap:
             lines.append({"label": f"学年满 {SIX_PLUS} 人补差（第一年改按 {y1:g}%）", "fee": None, "rate": None,

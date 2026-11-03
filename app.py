@@ -777,6 +777,9 @@ def statement_form(c, f):
                          "courses": f.getlist("s_courses")[i].strip(), "origin": f.getlist("s_origin")[i],
                          "tuition": tuition, "note": f.getlist("s_note")[i].strip(),
                          "rate": fnum(f.getlist("s_rate")[i])})
+        pay = f.getlist("s_pay")
+        if i < len(pay) and pay[i] == "0":
+            students[-1]["nopay"] = True
     c["students"] = students
     for k in ("other_amount",):
         c[k] = fnum(f.get(k))
@@ -2164,19 +2167,21 @@ def _student_match(name, pool):
                  and (ws <= set(_name_key(s.get("name")).split()) or set(_name_key(s.get("name")).split()) <= ws)), None)
 
 
-def _students_pack(z, choice=None):
+def _students_pack(z, choice=None, pays=None):
     """choice：预览页里每个学生选的代理 {行号: 代理id / "self" / ""（待分配）}，没选的用包里的建议。
+    pays：每个学生本学期付不付佣金 {行号: "1" / "0"}，没选的用包里的建议（包里写了 nopay 的默认不付）。
     结算单按最后选定的代理重新分组：包里本学期要结算的学生，换了代理就跟着进新代理的草稿。"""
     pack = json.loads(z.read("students.json").decode("utf-8"))
     agents = agents_by_id()
     codes = {a.get("code"): a for a in agents.values() if a.get("code")}
     have = vault.all("student")
     comms = vault.all("commission")
-    choice = choice or {}
+    choice, pays = choice or {}, pays or {}
     plan = {}  # 学生名 -> 包里的结算单
     for st in pack.get("statements", []):
         for n in st.get("students", []):
             plan[n] = st
+    term0 = pack.get("term") or next((st["term"] for st in pack.get("statements", []) if st.get("term")), "")
     rows = []
     for i, x in enumerate(pack.get("students", [])):
         a, self_ = codes.get(x.get("agent_code")), bool(x.get("self"))
@@ -2184,13 +2189,17 @@ def _students_pack(z, choice=None):
         if pick is not None:
             a, self_ = (agents.get(pick), False) if pick not in ("", "self") else (None, pick == "self")
         old = _student_match(x["name"], have)
+        pay0 = x["name"] in plan and not x.get("nopay")
+        pay = pays[i] == "1" if pays.get(i) in ("0", "1") else pay0
         rows.append(dict(x, i=i, agent=a, self=self_, exists=old, changed=pick is not None and (
             (a or {}).get("code") != x.get("agent_code") or self_ != bool(x.get("self"))),
-            agent_missing=not a and not self_))
+            agent_missing=not a and not self_, pay=pay, pay0=pay0, pay_changed=pay != pay0))
     groups = {}
     for x in rows:
-        st = plan.get(x["name"])
-        if not st:
+        if not x["pay"] or x["self"]:
+            continue
+        st = plan.get(x["name"]) or {"term": term0, "agent_code": x.get("agent_code"), "agent_hint": x.get("agent_hint")}
+        if not st.get("term"):
             continue
         key = x["agent"]["id"] if x["agent"] else ("?" + (st.get("agent_hint") or st.get("agent_code") or "") if not x["self"] else None)
         if key is None:
@@ -2214,9 +2223,10 @@ def _students_pack(z, choice=None):
     return pack, rows, stmts
 
 
-def _students_import(z, choice=None):
-    """导入学生（按名字合并，不重复）、归到代理、建本学期结算单草稿和邮件草稿、存各代理的 Roster 底稿。都不会发信。"""
-    pack, rows, stmts = _students_pack(z, choice)
+def _students_import(z, choice=None, pays=None):
+    """导入学生（按名字合并，不重复）、归到代理、建本学期结算单草稿和邮件草稿、存各代理的 Roster 底稿。都不会发信。
+    本学期不付佣金的学生只导入学生资料，不进结算单（已有的未发出草稿里有他，会拿掉）。"""
+    pack, rows, stmts = _students_pack(z, choice, pays)
     today = dt.date.today().isoformat()
     by_name = {}
     n_new = n_upd = 0
@@ -2234,6 +2244,7 @@ def _students_import(z, choice=None):
         if x.get("note"):
             st["notes"] = x["note"]
         st["roster_note"] = x.get("roster_note") or ""
+        st["commission_note"] = "" if x["pay"] else (x.get("pay_note") or "本学期不付佣金")
         if x.get("changed"):
             st["agent_manual"] = True  # 在导入预览里改过的，算你手动分配
         if x.get("changed") or not st.get("agent_manual"):  # 你以前手动分配过的不改
@@ -2249,6 +2260,15 @@ def _students_import(z, choice=None):
         st["imported_from"] = pack.get("source", "")
         st = vault.put("student", st)
         by_name[x["name"]] = st
+    unpaid = {_name_key(x["name"]) for x in rows if not x["pay"]}
+    if unpaid:  # 以前导入时进了草稿、现在定为不付的，从没发出的草稿里拿掉
+        for c in vault.all("commission"):
+            if c.get("locked") or c.get("status") != "草稿":
+                continue
+            keep = [s2 for s2 in c.get("students", []) if _name_key(s2.get("name")) not in unpaid]
+            if len(keep) != len(c.get("students", [])):
+                c["students"] = keep
+                vault.put("commission", c)
     rosters = pack.get("rosters") or {}
     n_stmt, skipped = 0, []
     orders = {t: i for i, t in enumerate(terms())}
@@ -2364,7 +2384,8 @@ def inbox_import(name):
                 msg.append(f"{import_tracker(z.read('tracker.xlsx'))} 个潜在代理")
             if "students.json" in z.namelist():
                 choice = {int(k[6:]): v for k, v in request.form.items() if k.startswith("agent_") and k[6:].isdigit()}
-                n_new, n_upd, n_stmt, skipped = _students_import(z, choice)
+                pays = {int(k[4:]): v for k, v in request.form.items() if k.startswith("pay_") and k[4:].isdigit()}
+                n_new, n_upd, n_stmt, skipped = _students_import(z, choice, pays)
                 msg.append(f"学生新增 {n_new} 名、更新 {n_upd} 名，{n_stmt} 张结算单草稿（含邮件和附件草稿，都没有发出）"
                            + ("；没建结算单：" + "、".join(skipped) if skipped else ""))
     except Exception as e:

@@ -43,7 +43,7 @@
 <div><label>代理</label><select name="agent_id" id="agent" required><option value="">选择代理</option>{% for a in agents %}{% set s = agent_scheme(a) %}<option value="{{ a.id }}" data-y1="{{ s.y1 }}" data-y16="{{ s.y1_6 }}" data-y2="{{ s.y2 }}" data-y3="{{ s.y3 }}" {{ 'selected' if a.id==c.agent_id }}>{{ a.code or '' }} {{ a.name }}</option>{% endfor %}</select></div>
 <div><label>学期</label><input name="term" list="terms" value="{{ c.term }}" required><datalist id="terms">{% for t in terms %}<option>{{ t }}</option>{% endfor %}</datalist></div>
 <div><label>佣金规则</label><div class="small" id="rule" style="padding-top:6px">{{ scheme_label(c.agent) if c.agent else '' }}{% if c.agent and c.agent.level %}<br><span class="mute">本学年第一年学生已有 {{ c.ft1_ay }} 人{{ '，已按高档' if c.ft1_ay >= 6 else '，满 6 人自动升档并补差' }}</span>{% endif %}</div></div></div>
-<div class="tablewrap"><table style="margin-top:12px" id="stu"><tr><th>学生姓名</th><th>类别</th><th>课程</th><th>本地/国际</th><th>已缴学费</th><th>比例覆盖</th><th>备注</th><th class="r">佣金（预估）</th><th></th></tr>
+<div class="tablewrap"><table style="margin-top:12px" id="stu"><tr><th>学生姓名</th><th>类别</th><th>课程</th><th>本地/国际</th><th>已缴学费</th><th>比例覆盖</th><th>本学期佣金</th><th>备注</th><th class="r">佣金（预估）</th><th></th></tr>
 {% for s in (c.students or []) + [{}] %}<tr class="srow">
 <td><input name="s_name" value="{{ s.name or '' }}" style="min-width:130px"></td>
 <td><select name="s_program">{% for k, v in PROGRAMS.items() %}<option value="{{ k }}" {{ 'selected' if s.program==k }}>{{ v }}</option>{% endfor %}</select></td>
@@ -51,6 +51,7 @@
 <td><select name="s_origin">{% for o in ['International','Local'] %}<option {{ 'selected' if s.origin==o }}>{{ o }}</option>{% endfor %}</select></td>
 <td><input name="s_tuition" class="tu" value="{{ s.tuition if s.tuition is not none else '' }}" style="width:100px"></td>
 <td><input name="s_rate" class="ov" value="{{ s.rate if s.rate is not none else '' }}" placeholder="%" style="width:60px"></td>
+<td><select name="s_pay" class="pay" title="例如合同只付前两个学期、已经付清，就选「不付」"><option value="1">付</option><option value="0" {{ 'selected' if s.nopay }}>不付</option></select></td>
 <td><input name="s_note" value="{{ s.note or '' }}"></td><td class="r amt"></td><td><button type="button" class="btn ghost del" title="删除">×</button></td></tr>{% endfor %}
 </table></div>
 <p><button type="button" class="btn ghost" id="add">+ 加一名学生</button></p>
@@ -70,14 +71,14 @@
 {% if c.imported and c.excel_commission is not none %}<p class="small mute">Excel 原记录：{{ c.excel_commission|money }}{% if c.mismatch %}，与系统计算不同，请核对{% endif %}。</p>{% endif %}</div>{% endif %}
 
 <script>
-const $=id=>document.getElementById(id), T=$('stu'), PRIOR={{ (c.ft1_ay or 0) - ((c.students or [])|selectattr('program','equalto','FT1')|list|length) }};
+const $=id=>document.getElementById(id), T=$('stu'), PRIOR={{ (c.ft1_ay or 0) - ((c.students or [])|rejectattr('nopay')|selectattr('program','equalto','FT1')|list|length) }};
 function num(v){return Number(String(v||'').replace(/[,$]/g,''))||0}
 function calc(){const o=$('agent').selectedOptions[0]||{dataset:{}};const d=o.dataset;
- const rows=[...T.querySelectorAll('.srow')];const n1=PRIOR+rows.filter(r=>r.querySelector('[name=s_program]').value==='FT1'&&r.querySelector('[name=s_name]').value.trim()).length;
+ const rows=[...T.querySelectorAll('.srow')];const n1=PRIOR+rows.filter(r=>r.querySelector('.pay').value!=='0'&&r.querySelector('[name=s_program]').value==='FT1'&&r.querySelector('[name=s_name]').value.trim()).length;
  const y1=n1>=6?num(d.y16):num(d.y1);const rate={FT1:y1,FT2:num(d.y2),FT3:num(d.y3),PT:15,AP:10};let t=0;
- rows.forEach(r=>{const ov=r.querySelector('.ov').value;const p=ov!==''?num(ov):rate[r.querySelector('[name=s_program]').value];const a=num(r.querySelector('.tu').value)*p/100;t+=a;r.querySelector('.amt').textContent=a?'$'+a.toLocaleString(undefined,{maximumFractionDigits:2})+' ('+p+'%)':'';});
+ rows.forEach(r=>{if(r.querySelector('.pay').value==='0'){r.querySelector('.amt').textContent='不付';r.style.color='#999';return;}r.style.color='';const ov=r.querySelector('.ov').value;const p=ov!==''?num(ov):rate[r.querySelector('[name=s_program]').value];const a=num(r.querySelector('.tu').value)*p/100;t+=a;r.querySelector('.amt').textContent=a?'$'+a.toLocaleString(undefined,{maximumFractionDigits:2})+' ('+p+'%)':'';});
  t+=num($('other').value);$('total').textContent='$'+t.toLocaleString(undefined,{maximumFractionDigits:2});}
-$('add').onclick=()=>{const r=T.querySelector('.srow:last-child').cloneNode(true);r.querySelectorAll('input').forEach(i=>i.value='');T.querySelector('tbody').appendChild(r);calc();};
+$('add').onclick=()=>{const r=T.querySelector('.srow:last-child').cloneNode(true);r.querySelectorAll('input').forEach(i=>i.value='');r.querySelector('.pay').value='1';T.querySelector('tbody').appendChild(r);calc();};
 T.addEventListener('click',e=>{if(e.target.classList.contains('del')&&T.querySelectorAll('.srow').length>1){e.target.closest('tr').remove();calc();}});
 $('f').addEventListener('input',calc);$('f').addEventListener('change',calc);calc();
 </script>{% endblock %}

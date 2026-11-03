@@ -7,13 +7,14 @@
 {% if pv %}<div class="card"><h2>{{ sel }} 的内容</h2>
 {% if pv.students %}{% set sp = pv.students %}
 <h3>学生 {{ sp.rows|length }} 名{% if sp.pack.source %} <span class="small mute">来自 {{ sp.pack.source }}</span>{% endif %}</h3>
-<p class="small mute">「归到代理」一栏可以直接改，导入时按你选的为准（改过的行变蓝）。导入后在「学生申请」里。名字和系统里已有的学生一样的会合并，不会重复；你手动分配过代理的学生不会被改。</p>
-<div class="tablewrap"><table class="small"><tr><th>学生</th><th>年级</th><th>归到代理</th><th>类别</th><th>本地/国际</th><th class="r">本学期学费</th><th>备注</th></tr>
+<p class="small mute">「归到代理」和「本学期佣金」两栏可以直接改，导入时按你选的为准（改过的变蓝）。选「不付」的学生只导入学生资料，不进结算单。导入后在「学生申请」里。名字和系统里已有的学生一样的会合并，不会重复；你手动分配过代理的学生不会被改。</p>
+<div class="tablewrap"><table class="small"><tr><th>学生</th><th>年级</th><th>归到代理</th><th>本学期佣金</th><th>类别</th><th>本地/国际</th><th class="r">本学期学费</th><th>备注</th></tr>
 {% for x in sp.rows %}<tr{% if x.agent_missing %} style="background:#fff4e0"{% endif %}><td>{{ x.name }}{% if x.exists %} <span class="tag">已有，合并</span>{% endif %}</td><td>{{ x.grade or '' }}</td>
 <td><select name="agent_{{ x.i }}" form="importform" style="max-width:260px" onchange="this.closest('tr').style.background=this.value===this.dataset.orig?'':'#e8f4ff'" data-orig="{{ x.agent.id if x.agent else ('self' if x.self else '') }}">
 <option value="" {{ 'selected' if not x.agent and not x.self }}>待分配{% if x.agent_hint %}（文件夹写的：{{ x.agent_hint }}）{% endif %}</option>
 <option value="self" {{ 'selected' if x.self }}>学生自己申请（没有代理）</option>
 {% for a in sp.agent_list %}<option value="{{ a.id }}" {{ 'selected' if x.agent and x.agent.id == a.id }}>{{ a.name }}{{ ' ' ~ a.code if a.code }}</option>{% endfor %}</select></td>
+<td><select name="pay_{{ x.i }}" form="importform" onchange="this.style.background=this.value===this.dataset.orig?'':'#e8f4ff'" data-orig="{{ '1' if x.pay0 else '0' }}"><option value="1" {{ 'selected' if x.pay }}>付</option><option value="0" {{ 'selected' if not x.pay }}>不付</option></select>{% if not x.pay and x.pay_note %}<div class="small mute" style="max-width:220px">{{ x.pay_note }}</div>{% endif %}</td>
 <td>{{ PROGRAMS.get(x.program, x.program) }}</td><td>{{ x.origin or '' }}</td><td class="r">{{ x.tuition|money if x.tuition else '' }}</td><td class="mute">{{ x.note or '' }}</td></tr>{% endfor %}</table></div>
 <h3>结算单草稿 {{ sp.stmts|length }} 张（只建草稿，不会发信）</h3>
 <p class="small mute">下表是按建议的代理排的；上面改了代理，导入时结算单会跟着按你选的代理建。</p>
