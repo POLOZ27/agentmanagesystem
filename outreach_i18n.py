@@ -730,3 +730,48 @@ def translation_for(tpl, lang):
     """模板里某语言的正文；瑞士 de-CH 没有时用 de。"""
     tr = tpl.get("translations") or {}
     return tr.get(lang) or (tr.get(lang.split("-")[0], "") if lang else "")
+
+
+# ---------- 按地区选收件人（2026-11-05 POLO：推广邮件分地区发） ----------
+_REGION_EXTRA = {
+    "东亚": ["China", "Hong Kong", "Taiwan", "Macau", "Mongolia", "中国", "香港", "台湾", "澳门"],
+    "东南亚": ["Malaysia", "Indonesia", "Philippines", "Singapore", "Cambodia", "Myanmar"],
+    "南亚": ["India", "Nepal", "Bangladesh", "Pakistan", "Sri Lanka"],
+    "中东 / 中亚": ["United Arab Emirates", "Saudi Arabia", "Kazakhstan", "Uzbekistan", "Iran", "Israel"],
+    "拉美": ["Peru", "Chile", "Argentina", "Ecuador"],
+    "北美": ["Canada", "USA", "United States", "加拿大", "美国"],
+    "西欧": ["Spain", "France", "United Kingdom", "UK", "Netherlands", "Belgium", "Portugal"],
+    "非洲": ["Nigeria", "Kenya", "Ghana", "Egypt", "South Africa"],
+}
+_REGION_OF = {}
+for _r, _cs in list(TARGET_REGIONS.items()) + list(_REGION_EXTRA.items()):
+    for _c in _cs:
+        _REGION_OF.setdefault(_c.lower(), _r)
+for _c, _zh in COUNTRY_ZH.items():
+    if _c.lower() in _REGION_OF:
+        _REGION_OF.setdefault(_zh, _REGION_OF[_c.lower()])
+
+
+_ZH_EXTRA = {"China": "中国", "Hong Kong": "香港", "Taiwan": "台湾", "Macau": "澳门", "Canada": "加拿大", "USA": "美国",
+             "United States": "美国", "Malaysia": "马来西亚", "Indonesia": "印度尼西亚", "Philippines": "菲律宾",
+             "Singapore": "新加坡", "Spain": "西班牙", "France": "法国", "United Kingdom": "英国", "Mongolia": "蒙古",
+             "Kazakhstan": "哈萨克斯坦", "United Arab Emirates": "阿联酋", "Chile": "智利", "Argentina": "阿根廷"}
+
+
+def region_of(country):
+    """国家 → 地区（东欧、拉美、东亚…）；表里没有的就用国家名自己当地区，没填的归「未填国家」。"""
+    c = (country or "").strip()
+    if not c:
+        return "未填国家"
+    return _REGION_OF.get(c.lower()) or _REGION_OF.get(c) or COUNTRY_ZH.get(c, c)
+
+
+def recipient_groups(people):
+    """people: [{id, label, sub, country, checked}] → [(地区, [人…])]，地区按名字排，人按国家、名字排。"""
+    g = {}
+    for p in people:
+        c = p.get("country") or ""
+        p = dict(p, country_zh=COUNTRY_ZH.get(c) or _ZH_EXTRA.get(c, c))
+        g.setdefault(region_of(p.get("country")), []).append(p)
+    return [(r, sorted(ps, key=lambda x: (x["country_zh"], x["label"].lower())))
+            for r, ps in sorted(g.items(), key=lambda kv: (kv[0] == "未填国家", kv[0]))]

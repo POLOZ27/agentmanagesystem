@@ -32,7 +32,7 @@
 <select form="filt" name="tier" onchange="document.getElementById('filt').submit()"><option value="">全部等级</option>{% for t in 'ABC' %}<option {{ 'selected' if t==f.tier }}>{{ t }}</option>{% endfor %}</select>
 <select form="filt" name="stage" onchange="document.getElementById('filt').submit()"><option value="">全部阶段</option>{% for s in PROSPECT_STAGES %}<option {{ 'selected' if s==f.stage }}>{{ s }}</option>{% endfor %}</select>
 <input form="filt" name="q" value="{{ f.q }}" placeholder="搜索机构、联系人、城市" style="width:200px">
-<span style="flex:1"></span><span class="small mute" id="cnt">已选 0 个</span>
+<span style="flex:1"></span><span class="small mute" id="cnt" title="不勾也可以，下一页可以按地区选">已选 0 个（不勾 = 下一页按地区选）</span>
 <button class="btn ghost" name="kind" value="followup">发跟进邮件</button><button class="btn">✉ 一键发开发邮件</button></div>
 <table><tr><th><input type="checkbox" class="chk" id="all"></th><th>等级</th><th>机构</th><th>国家 / 城市</th><th>联系人</th><th>邮箱</th><th>阶段</th><th>上次联系</th></tr>
 {% for p in rows if p.stage != '待审核' %}<tr><td>{% if p.email and not p.unsubscribed and p.stage not in ['已转为代理','不合适'] %}<input type="checkbox" class="chk pick" name="ids" value="{{ p.id }}">{% endif %}</td>
@@ -44,4 +44,4 @@
 <form id="filt" method="get"></form>
 <script>const picks=[...document.querySelectorAll('.pick')],cnt=document.getElementById('cnt');function u(){cnt.textContent='已选 '+picks.filter(p=>p.checked).length+' 个'}
 picks.forEach(p=>p.onchange=u);document.getElementById('all').onchange=e=>{picks.forEach(p=>p.checked=e.target.checked);u()};
-document.getElementById('sel').onsubmit=e=>{if(!picks.some(p=>p.checked)){alert('先勾选要发的代理');e.preventDefault()}};</script>{% endblock %}
+/* 不勾也可以：下一页按地区选，默认全部地区 */</script>{% endblock %}

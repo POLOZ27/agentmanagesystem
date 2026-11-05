@@ -1,0 +1,17 @@
+{# 按地区选收件人：groups = recipient_groups(...)，rp_name = 提交的字段名，rp_form = 表单 id #}
+<div class="card rpick" style="padding:0"><div style="padding:14px 16px 0"><div class="toolbar" style="flex-wrap:wrap;margin:0"><h2 style="margin:0">收件人</h2><span class="small mute">已选 <b class="rp-n">0</b> 个</span><span style="flex:1"></span>
+<span class="small">地区：</span><button type="button" class="btn ghost rp-all">全部地区</button><button type="button" class="btn ghost rp-none">全部取消</button></div>
+<div class="rp-regions" style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">{% for r, ps in groups %}<label class="tag" style="cursor:pointer;margin:0"><input type="checkbox" class="rp-r" value="{{ r }}" checked style="width:auto;margin:0 4px 0 0">{{ r }} <span class="mute">{{ ps|length }}</span></label>{% endfor %}</div>
+<p class="small mute" style="margin:0 0 8px">默认全部地区。点「全部取消」再勾想要的地区；地区里的代理还可以一个个勾掉。没勾的地区不会发。</p></div>
+{% for r, ps in groups %}<div class="rp-g" data-r="{{ r }}"><div class="small" style="padding:6px 16px;background:#faf8f6;border-top:1px solid #eee"><b>{{ r }}</b> · <a href="#" class="rp-gall">本地区全选</a> / <a href="#" class="rp-gnone">全不选</a></div>
+<table class="small">{% for p in ps %}<tr><td style="width:28px"><input type="checkbox" class="rp-p" name="{{ rp_name }}" value="{{ p.id }}" form="{{ rp_form }}" {{ 'checked' if p.checked }} style="width:auto;margin:0"></td>
+<td>{{ p.label }}</td><td class="mute">{{ p.country_zh or '' }}</td><td class="mute">{{ p.sub or '' }}</td></tr>{% endfor %}</table></div>{% endfor %}
+{% if not groups %}<p style="padding:0 16px 14px" class="mute">没有可以发的对象（需要有邮箱、没退订）。</p>{% endif %}</div>
+<script>(function(){const box=document.currentScript.previousElementSibling;
+function sync(){box.querySelectorAll('.rp-r').forEach(r=>{const g=box.querySelector('.rp-g[data-r="'+CSS.escape(r.value)+'"]');g.hidden=!r.checked;g.querySelectorAll('.rp-p').forEach(i=>i.disabled=!r.checked)});
+ const n=box.querySelectorAll('.rp-p:checked:not(:disabled)').length;box.querySelector('.rp-n').textContent=n;document.querySelectorAll('.rp-count').forEach(e=>e.textContent=n)}
+box.querySelector('.rp-all').onclick=()=>{box.querySelectorAll('.rp-r').forEach(r=>r.checked=true);sync()};
+box.querySelector('.rp-none').onclick=()=>{box.querySelectorAll('.rp-r').forEach(r=>r.checked=false);sync()};
+box.querySelectorAll('.rp-r').forEach(r=>r.onchange=()=>{const g=box.querySelector('.rp-g[data-r="'+CSS.escape(r.value)+'"]');if(r.checked&&!g.querySelector('.rp-p:checked'))g.querySelectorAll('.rp-p').forEach(i=>i.checked=true);sync()});
+box.querySelectorAll('.rp-gall,.rp-gnone').forEach(a=>a.onclick=e=>{e.preventDefault();a.closest('.rp-g').querySelectorAll('.rp-p').forEach(i=>i.checked=a.classList.contains('rp-gall'));sync()});
+box.querySelectorAll('.rp-p').forEach(i=>i.onchange=sync);sync();window.rpCount=()=>box.querySelectorAll('.rp-p:checked:not(:disabled)').length;})();</script>

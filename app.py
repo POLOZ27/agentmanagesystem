@@ -1385,15 +1385,24 @@ def outreach():
                 sent += 1
         flash(f"已发出 {sent} 封{'跟进' if follow else '开发'}邮件" + (f"，{skipped} 个没有邮箱或已退订，已跳过" if skipped else ""))
         return redirect(url_for("prospects"))
-    langs = sorted({i18n.lang_for(p.get("country")) for p in picked} - {None})
     follow = request.values.get("kind") == "followup"
+    # 收件人按地区选：所有能发的潜在代理都列出来；从列表页勾过的只勾那些，没勾过就默认全选
+    pool = [p for p in vault.all("prospect") if p.get("email") and not p.get("unsubscribed")
+            and p.get("stage") not in ("待审核", "已转为代理", "不合适")]
+    chosen = {p["id"] for p in picked}
+    pool_ids = {p["id"] for p in pool}
+    pool += [p for p in picked if p["id"] not in pool_ids and p.get("email") and not p.get("unsubscribed")]
+    groups = i18n.recipient_groups([{"id": p["id"], "label": p.get("agency") or p.get("contact") or p["email"],
+                                     "sub": f"{p['email']} · 已发 {p.get('emails_sent') or 0} 封", "country": p.get("country"),
+                                     "checked": p["id"] in chosen if chosen else True} for p in pool])
+    langs = sorted({i18n.lang_for(p.get("country")) for p in pool} - {None})
     tpls = all_templates()
     mine = [t for t in tpls if t["kind"] == ("followup" if follow else "outreach")] or tpls
     tpl = next((t for t in tpls if t["id"] == request.args.get("tpl")), None) or \
         next((t for t in mine if t.get("seed", "").startswith("promo-")), None) or \
         next((t for t in mine if "推荐" in t["name"]), mine[0])
     labels = i18n.LANG_LABELS
-    return render_template("outreach.html", picked=picked, english=tpl, langs=langs, kind="followup" if follow else "",
+    return render_template("outreach.html", picked=picked, groups=groups, english=tpl, langs=langs, kind="followup" if follow else "",
                            tpl=tpl, tpls=tpls,
                            translations={l: {"label": labels.get(l, l), "body": i18n.translation_for(tpl, l)}
                                          for l in langs},
@@ -1546,7 +1555,13 @@ def compose():
         vault.put("campaign", c)
         flash("定时推送已创建")
         return redirect(url_for("mail"))
-    return render_template("compose.html", agents=agents, pre=request.args.get("agent"), tpls=all_templates(),
+    pre = request.args.get("agent")
+    groups = i18n.recipient_groups([{"id": a["id"], "label": f"{a.get('code') or ''} {a['name']}".strip(),
+                                     "sub": a["email"] + ("" if a.get("status") == "活跃" else f" · {a.get('status') or '未激活'}"),
+                                     "country": a.get("country"),
+                                     "checked": a["id"] == pre if pre else a.get("status") == "活跃"}
+                                    for a in agents if not a.get("unsubscribed")])
+    return render_template("compose.html", agents=agents, pre=pre, groups=groups, tpls=all_templates(),
                            kit=[x for x in all_assets() if x.get("url") and x.get("share")])
 
 
