@@ -1360,13 +1360,21 @@ def outreach():
             t.setdefault("translations", {}).update({k: v["body"] for k, v in custom.items()})
             t["edited"] = True
             vault.put("template", t)
+        kit = kit_link()
+        left = i18n.unfilled(*(i18n.fill_links(x, kit) for x in
+                               [english["subject"], english["body"]] + [v["body"] for v in custom.values()]))
+        if left:
+            flash("还没发：邮件里还有没填的地方 " + "、".join("{" + x + "}" for x in left) +
+                  ("。资料包链接请到 设置 → 合作伙伴资料包链接 填好" if "kit_link" in left else "") + "，改好再发。")
+            return redirect(url_for("outreach", ids=list(ids), tpl=request.form.get("tpl", ""),
+                                    kind=request.form.get("kind", "")))
         with mailer.Outbox(vault) as box:
             for p in picked:
                 if not p.get("email") or p.get("unsubscribed"):
                     skipped += 1
                     continue
                 lang = i18n.lang_for(p.get("country"))
-                subject, body, _ = i18n.compose(p, english, custom.get(lang, False))
+                subject, body, _ = i18n.compose(p, english, custom.get(lang, False), kit)
                 box.send(p["email"], subject, body, prospect_id=p["id"], kind="outreach")
                 today = dt.date.today().isoformat()
                 p["first_email_on"] = p.get("first_email_on") or today
@@ -1389,7 +1397,7 @@ def outreach():
                            tpl=tpl, tpls=tpls,
                            translations={l: {"label": labels.get(l, l), "body": i18n.translation_for(tpl, l)}
                                          for l in langs},
-                           has_ai=ai.available(settings()), ai_mode=ai.mode(settings()))
+                           has_ai=ai.available(settings()), ai_mode=ai.mode(settings()), has_kit=bool(kit_link()))
 
 
 def all_templates():
@@ -1522,9 +1530,15 @@ def compose():
         c = {"subject": f["subject"], "body": f["body"], "audience": f["audience"],
              "agent_ids": f.getlist("agent_ids"), "cadence": f["cadence"], "sender": f.get("sender") or None}
         when = f.get("send_at")
+        left = [x for x in i18n.unfilled(i18n.fill_links(c["subject"] + "\n" + c["body"], kit_link()))
+                if x in ("link", "kit_link", "intake", "deadline")]
+        if left:
+            flash("还没发：邮件里还有没填的地方 " + "、".join("{" + x + "}" for x in left) +
+                  ("。资料包链接请到 设置 → 合作伙伴资料包链接 填好" if "kit_link" in left else "") + "，改好再发。")
+            return redirect(url_for("compose"))
         if f["cadence"] == "立即发送" and not when:
             sent = mailer.send_to_agents(vault, mailer.recipients(vault, c), c["subject"], c["body"],
-                                         sender=c["sender"])
+                                         sender=c["sender"], kit_link=kit_link())
             flash(f"已处理 {len(sent)} 封邮件")
             return redirect(url_for("mail", box="out"))
         c.update(active=True, next_at=when or dt.datetime.now().isoformat(timespec="minutes"),

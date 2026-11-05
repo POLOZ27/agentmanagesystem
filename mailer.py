@@ -231,7 +231,9 @@ def settings(vault):
     return s
 
 
-def render(text, agent):
+def render(text, agent, kit_link=""):
+    import outreach_i18n
+    text = outreach_i18n.fill_links(text, kit_link)
     return (text.replace("{代理名称}", agent.get("name", ""))
                 .replace("{代理编号}", agent.get("code") or "")
                 .replace("{联系人}", agent.get("contact") or agent.get("name", ""))
@@ -295,12 +297,13 @@ class Outbox:
             "attachments": files, "at": dt.datetime.now().isoformat(timespec="seconds"), "status": status, **meta})
 
 
-def send_to_agents(vault, agents, subject, body, campaign_id=None, kind="news", sender=None):
+def send_to_agents(vault, agents, subject, body, campaign_id=None, kind="news", sender=None, kit_link=None):
     sent = []
+    kit_link = settings(vault).get("kit_link", "") if kit_link is None else kit_link
     with Outbox(vault) as box:
         for a in agents:
             if a.get("email") and not a.get("unsubscribed"):
-                sent.append(box.send(a["email"], render(subject, a), render(body, a), agent_id=a["id"],
+                sent.append(box.send(a["email"], render(subject, a, kit_link), render(body, a, kit_link), agent_id=a["id"],
                                      campaign_id=campaign_id, kind=kind, sender=sender))
     return sent
 

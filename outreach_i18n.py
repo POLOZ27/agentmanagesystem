@@ -3,6 +3,7 @@
 译文由 AI 翻译，正式群发前建议请母语人士快速校对一遍（尤其是格鲁吉亚语、亚美尼亚语）。
 {name} 会替换成联系人名字或机构名。
 """
+import re
 
 COUNTRY_LANG = {
     "Czech Republic": "cs", "Czechia": "cs", "Slovakia": "sk", "Poland": "pl", "Hungary": "hu",
@@ -595,7 +596,21 @@ def lang_for(country):
     return COUNTRY_LANG.get((country or "").strip())
 
 
-def compose(prospect, english=None, translation=None):
+def fill_links(text, kit_link=""):
+    """{link} 换成预约链接，{kit_link} 换成资料包链接（没设置时保留原样，发信前会被拦下）。"""
+    text = text.replace("{link}", LINK)
+    return text.replace("{kit_link}", kit_link) if kit_link else text
+
+
+def unfilled(*texts):
+    """发信前还没填的占位符（{name}、{agency} 会自动换，不算）。"""
+    left = set()
+    for t in texts:
+        left |= set(re.findall(r"\{([a-z_]+)\}", t or ""))
+    return sorted(left - {"name", "agency"})
+
+
+def compose(prospect, english=None, translation=None, kit_link=""):
     """拼出一封开发邮件：英文在上，当地语言版本在下。返回 (subject, body, lang)。"""
     english = english or EN
     name = prospect.get("contact") if prospect.get("contact") and "General" not in prospect.get("contact", "") \
@@ -607,7 +622,7 @@ def compose(prospect, english=None, translation=None):
     tr = TRANSLATIONS.get(lang) if translation is None else translation  # False = 只发英文
     if tr:
         body += f"\n\n———— {tr['label']} ————\n\n" + tr["body"].replace("{name}", name).replace("{agency}", agency)
-    return subject, body + UNSUBSCRIBE, lang
+    return fill_links(subject, kit_link), fill_links(body, kit_link) + UNSUBSCRIBE, lang
 
 
 # ---------- 跟进邮件（第一封发出 7 天没回复时用） ----------
