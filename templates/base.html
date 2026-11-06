@@ -20,4 +20,29 @@ if(i>=0)s=s.slice(0,i+1);else if(nav.redirectCount>0&&s.length)s[s.length-1]=her
 s=s.slice(-30);try{sessionStorage.setItem('nav',JSON.stringify(s))}catch(e){}
 if(s.length>1)document.getElementById('backlink').href=s[s.length-2];})();</script>
 {% else %}<script>try{sessionStorage.setItem('nav',JSON.stringify([location.pathname+location.search]))}catch(e){}</script>{% endif %}
-{% if inbox_n and request.endpoint != 'inbox_page' %}<div class="flash">📥 加密收件箱里有 {{ inbox_n }} 个待确认的资料包，<a href="{{ url_for('inbox_page') }}">去预览并确认导入</a></div>{% endif %}{% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}{% block body %}{% endblock %}</main></body></html>
+{% if inbox_n and request.endpoint != 'inbox_page' %}<div class="flash">📥 加密收件箱里有 {{ inbox_n }} 个待确认的资料包，<a href="{{ url_for('inbox_page') }}">去预览并确认导入</a></div>{% endif %}{% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}{% block body %}{% endblock %}</main>
+{% if session.ok %}<div id="idlebar" class="idlebar" hidden><span id="idlemsg"></span> <button type="button" class="btn small" id="idlekeep">继续使用</button></div>
+<script>(function(){
+/* ① 快到自动退出时提醒；点「继续使用」刷新登录时间 */
+const LIMIT={{ IDLE_MINUTES }}*60e3,WARN=2*60e3,bar=document.getElementById('idlebar'),msg=document.getElementById('idlemsg');let t0=Date.now(),tw,tx;
+function arm(){t0=Date.now();clearTimeout(tw);clearTimeout(tx);bar.hidden=true;tw=setTimeout(()=>{bar.hidden=false;msg.textContent='两分钟内没有操作就会自动退出（为了安全）。正在写的内容不会丢，会暂存在这个浏览器里。'},LIMIT-WARN);
+ tx=setTimeout(()=>{bar.hidden=false;msg.textContent='已经超时退出。没提交的内容已暂存；重新登录后回到这个页面可以恢复。';document.getElementById('idlekeep').textContent='去登录';},LIMIT);}
+document.getElementById('idlekeep').onclick=()=>{if(Date.now()-t0>=LIMIT){location.href='{{ url_for('login') }}?next='+encodeURIComponent(location.pathname+location.search);return}
+ fetch('{{ url_for('ping') }}',{credentials:'same-origin'}).then(r=>{if(r.ok&&!r.redirected)arm();else location.reload()})};arm();
+/* ② 写到一半的表单（data-draft）暂存在这个浏览器标签里：超时退出、误关页面后可以恢复；提交成功后自动清掉 */
+const CLR={{ (clear_draft or '')|tojson }};try{if(CLR)Object.keys(sessionStorage).filter(k=>k.startsWith('draft:'+CLR+':')).forEach(k=>sessionStorage.removeItem(k))}catch(e){}
+document.querySelectorAll('form[data-draft]').forEach(f=>{const key='draft:'+f.dataset.draft+':'+location.pathname;
+ const fields=()=>[...f.elements].filter(e=>e.name&&e.name!=='_csrf'&&e.type!=='file'&&e.type!=='hidden'&&e.type!=='submit'&&e.tagName!=='BUTTON');
+ const snap=()=>JSON.stringify(fields().map(e=>e.type==='checkbox'||e.type==='radio'?e.checked:e.value));
+ const now=snap();let saved=null;try{saved=JSON.parse(sessionStorage.getItem(key)||'null')}catch(e){}
+ if(saved&&saved.v!==now){const d=document.createElement('div');d.className='flash';d.style.background='var(--warnbg)';d.style.color='var(--warn)';
+  d.innerHTML='这个页面有一份没提交成功的内容（'+saved.at+' 暂存）。 <button type="button" class="btn small">恢复</button> <button type="button" class="btn ghost small">不要了</button>';
+  f.parentNode.insertBefore(d,f);const [ok,no]=d.querySelectorAll('button');
+  ok.onclick=()=>{const v=JSON.parse(saved.v),add=f.querySelector('[data-addrow]');let fs=fields(),n=0;while(add&&v.length>fs.length&&n++<80){add.click();fs=fields()}if(v.length===fs.length)fs.forEach((e,i)=>{if(e.type==='checkbox'||e.type==='radio')e.checked=v[i];else e.value=v[i]});
+   f.dispatchEvent(new Event('change',{bubbles:true}));f.dispatchEvent(new Event('input',{bubbles:true}));d.remove()};
+  no.onclick=()=>{try{sessionStorage.removeItem(key)}catch(e){}d.remove()};}
+ let tm;const save=()=>{clearTimeout(tm);tm=setTimeout(()=>{const v=snap();try{if(v===now)sessionStorage.removeItem(key);else sessionStorage.setItem(key,JSON.stringify({v:v,at:new Date().toLocaleTimeString()}))}catch(e){}},400)};
+ f.addEventListener('input',save);f.addEventListener('change',save);});
+/* ③ 筛选栏（class=autofilter）：选完下拉或勾选就筛，不用再点按钮；搜索框按回车 */
+document.querySelectorAll('form.autofilter').forEach(f=>f.querySelectorAll('select,input[type=checkbox]').forEach(e=>e.addEventListener('change',()=>f.submit())));
+})();</script>{% endif %}</body></html>

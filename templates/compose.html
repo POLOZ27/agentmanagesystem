@@ -1,13 +1,12 @@
 {% extends "base.html" %}{% block body %}<h1>写邮件 / 新建 News 推送</h1>
-<form method="post" class="card" id="composeform"><input type="hidden" name="_csrf" value="{{ csrf }}"><div class="grid">
-<input type="hidden" name="audience" value="选定代理">
-<div><label>频率</label><select name="cadence"><option>立即发送</option><option>仅一次（定时）</option><option>每周</option><option>每两周</option><option>每月</option><option>每季度</option></select></div>
-<div><label>首次发送时间（定时用）</label><input type="datetime-local" name="send_at"></div>
-{% with kind = "news" %}{% include "_sender.html" %}{% endwith %}</div>
+<form method="post" id="composeform" data-draft="compose"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div class="card"><h2>① 写内容</h2>
 <label>用模板（选了会替换下面的主题和正文）</label><select id="tplpick"><option value="">不用模板</option>{% for x in tpls %}<option value="{{ loop.index0 }}">{{ x.name }}</option>{% endfor %}</select>
-<label>主题</label><input name="subject" id="subj" required value="Johnathan Academy 最新动态 | {代理名称}">
-<div class="toolbar" style="margin:10px 0 0"><label style="margin:0">正文（可用 {代理名称} {代理编号} {联系人} 自动替换）</label><span style="flex:1"></span>
-<select id="kit" style="width:auto"><option value="">插入宣传资料链接…</option>{% for x in kit %}<option value="{{ x.title }}: {{ x.url }}">{{ x.kind }} · {{ x.title }}</option>{% endfor %}</select></div><textarea name="body" id="body" required>Dear {联系人},
+<label>主题</label><input name="subject" id="subj" required value="{{ c.subject if c.subject is defined else 'Johnathan Academy 最新动态 | {代理名称}' }}">
+<div class="toolbar" style="margin:10px 0 4px;flex-wrap:wrap"><label style="margin:0">正文</label><span class="small mute">点一下插入：</span>
+{% for zh, en, hint in placeholders %}<button type="button" class="btn ghost small ph" data-v="{{ zh }}" title="{{ hint }}（也可以写成 {{ en }}）">{{ zh }}</button>{% endfor %}
+<span style="flex:1"></span><select id="kit" style="width:auto"><option value="">插入宣传资料链接…</option>{% for x in kit %}<option value="{{ x.title }}: {{ x.url }}">{{ x.kind }} · {{ x.title }}</option>{% endfor %}</select></div>
+<textarea name="body" id="body" required style="min-height:260px">{% if c.body is defined %}{{ c.body }}{% else %}Dear {联系人},
 
 感谢您一直以来对 Johnathan Academy 的支持。以下是本月学校动态：
 
@@ -19,10 +18,21 @@
 如有学生咨询，欢迎随时联系我们。您的代理编号：{代理编号}
 
 Best regards,
-Johnathan Academy</textarea>
-<p class="small mute">收件人在下面按地区选（默认勾活跃代理），一共 <b class="rp-count">0</b> 个。</p>
-<p><button class="btn" onclick="return rpCount()>0||(alert('还没选收件人'),false)">确定</button></p></form>
+Johnathan Academy{% endif %}</textarea>
+<p class="small mute" style="margin:6px 0 0">占位符会按每个代理自动替换；写错或没替换掉的 {…} 发送前会被拦下，不会发出去。</p></div>
+
+<h2 style="margin:20px 0 10px">② 选收件人</h2>
 {% with rp_name="agent_ids", rp_form="composeform" %}{% include "_recipients.html" %}{% endwith %}
+
+<div class="card"><h2>③ 什么时候发</h2><div class="grid">
+<div><label>频率</label><select name="cadence">{% for x in ['立即发送', '仅一次（定时）', '每周', '每两周', '每月', '每季度'] %}<option {{ 'selected' if c.cadence == x }}>{{ x }}</option>{% endfor %}</select></div>
+<div><label>首次发送时间（定时用）</label><input type="datetime-local" name="send_at" value="{{ c.send_at or '' }}"></div>
+{% with kind = "news" %}{% include "_sender.html" %}{% endwith %}</div>
+<p style="margin-top:14px"><button class="btn" name="action" value="preview" onclick="return rpCount()>0||(alert('还没选收件人'),false)">预览（发给 <span class="rp-count">0</span> 个代理）→</button>
+<span class="small mute">下一步先看替换好名字的邮件，可以先发一封给自己，确认后才真正发出。</span></p></div>
+</form>
 <script>const TPLS={{ tpls|map(attribute='subject')|list|tojson }},TPLB={{ tpls|map(attribute='body')|list|tojson }};
-document.getElementById('tplpick').addEventListener('change',function(){if(this.value==='')return;const b=document.getElementById('body');if(b.value.trim()&&!confirm('用这个模板替换现在的主题和正文？')){this.value='';return;}document.getElementById('subj').value=TPLS[this.value]||'';b.value=TPLB[this.value]||'';});
-document.getElementById('kit').addEventListener('change',function(){if(!this.value)return;const b=document.getElementById('body');const i=b.selectionStart||b.value.length;b.value=b.value.slice(0,i)+this.value+'\n'+b.value.slice(i);this.value='';b.focus();});</script>{% endblock %}
+document.getElementById('tplpick').addEventListener('change',function(){if(this.value==='')return;const b=document.getElementById('body');if(b.value.trim()&&!confirm('用这个模板替换现在的主题和正文？')){this.value='';return;}document.getElementById('subj').value=TPLS[this.value]||'';b.value=TPLB[this.value]||'';b.dispatchEvent(new Event('input',{bubbles:true}));});
+function ins(v){const b=document.getElementById('body');const i=b.selectionStart??b.value.length,j=b.selectionEnd??i;b.value=b.value.slice(0,i)+v+b.value.slice(j);b.focus();b.selectionStart=b.selectionEnd=i+v.length;b.dispatchEvent(new Event('input',{bubbles:true}));}
+document.querySelectorAll('.ph').forEach(x=>x.onclick=()=>ins(x.dataset.v));
+document.getElementById('kit').addEventListener('change',function(){if(!this.value)return;ins(this.value+'\n');this.value='';});</script>{% endblock %}

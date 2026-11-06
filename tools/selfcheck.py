@@ -18,6 +18,8 @@ try:
     png = contracts.page_png(pdf, 0)
     assert png[:8] == b"\x89PNG\r\n\x1a\n", "预览图不是 PNG"
     print(f"合同自检：通过（{n} 页，预览图正常）")
+    import version
+    print(f"系统版本：{version.VERSION}")
 except Exception as e:  # noqa: BLE001
     print(f"合同自检：失败 —— {type(e).__name__}: {e}")
     sys.exit(1)

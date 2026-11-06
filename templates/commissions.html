@@ -2,23 +2,23 @@
 <form class="toolbar" style="flex-wrap:wrap"><label style="margin:0">学期</label><select name="term" onchange="this.form.submit()">{% for t in terms|reverse %}<option {{ 'selected' if t==term }}>{{ t }}</option>{% endfor %}</select>
 <a class="btn ghost small" href="#" onclick="document.getElementById('newterm').hidden=!document.getElementById('newterm').hidden;return false">+ 新建学期</a>
 {% if term and not rows %}<button class="btn ghost small" form="delterm" onclick="return confirm('删除空学期「{{ term }}」？')">删除这个空学期</button>{% endif %}
-<span style="flex:1"></span><a class="btn ghost" href="{{ url_for('commissions_master', term=term) }}" title="在《代理表》后面加上这个结算期的一页，所有代理都列上">下载总表</a><a class="btn ghost" href="{{ url_for('commissions_export', term=term) }}">导出本期 Excel</a><a class="btn" href="{{ url_for('commission_edit', term=term) }}">+ 新结算单</a></form>
+<span style="flex:1"></span><a class="btn ghost" href="{{ url_for('commissions_export', term=term) }}">导出本期 Excel</a>{% if term %}<a class="btn ghost" href="{{ url_for('commission_roster_fill', term=term) }}" title="把已入学、在读的学生（含第二、三年续读）按合同自动带进本学期各代理的结算单草稿">按在读名册建草稿</a>{% endif %}<a class="btn" href="{{ url_for('commission_edit', term=term) }}">+ 新结算单</a></form>
 <form method="post" action="{{ url_for('term_create') }}" id="newterm" class="card toolbar" style="flex-wrap:wrap" hidden><input type="hidden" name="_csrf" value="{{ csrf }}">
 <label style="margin:0">新学期名称</label><input name="name" list="termsug" required placeholder="例如 {{ suggest[0] if suggest else 'Sep-Dec Fall 26-27' }}" style="min-width:240px">
 <datalist id="termsug">{% for t in suggest %}<option>{{ t }}</option>{% endfor %}</datalist>
 {% for t in suggest[:4] %}<a href="#" class="tag" onclick="this.closest('form').elements['name'].value='{{ t }}';return false">{{ t }}</a>{% endfor %}
 <button class="btn small">新建</button><span class="small mute" style="flex-basis:100%">名称里带学年（如 26-27）或年份（如 2027 Summer School），报表才能按学年统计。</span></form>
 <form method="post" action="{{ url_for('term_delete') }}" id="delterm"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="name" value="{{ term }}"></form>
-<div class="card"><h2>结算流程</h2>
-<ol class="flow">
+<div class="card"><div class="toolbar" style="flex-wrap:wrap;margin:0">{% for s in STAGES %}{% set g = rows|selectattr('stage','equalto',s)|list %}<span class="tag t-{{ s }}">{{ loop.index }}. {{ s }} {{ g|length }} · {{ g|map(attribute='amount')|sum|money or '$0' }}</span>{% endfor %}<span style="flex:1"></span>
+{% set drafts = rows|selectattr('stage','equalto','草稿')|rejectattr('imported')|selectattr('students')|list %}
+{% if drafts %}<a class="btn" href="{{ url_for('commission_queue', term=term) }}" title="一张一张打开预览页：看邮件和附件，没问题再发，可以跳过">逐张预览并发出 {{ drafts|length }} 张草稿 →</a>{% endif %}</div>
+<details style="margin-top:8px"><summary class="small mute" style="cursor:pointer">结算流程说明</summary>
+<ol class="flow" style="margin-top:8px">
 <li><b>草稿 · 填学生明细</b>上传 Student Roster 或逐个填写，系统按合同自动算佣金</li>
-<li><b>发结算单</b>一键把对账单 Excel 和结算邮件发给代理，金额锁定</li>
+<li><b>发结算单</b>预览邮件和附件后发给代理，金额锁定</li>
 <li><b>代理确认</b>代理回信确认并附发票，从收件箱一键登记</li>
 <li><b>交会计</b>一键把对账单、发票和付款信息发给会计</li>
-<li><b>已付</b>登记付款日期和凭证，可自动通知代理</li></ol>
-{% set drafts = rows|selectattr('stage','equalto','草稿')|rejectattr('imported')|list %}
-<div class="toolbar" style="flex-wrap:wrap">{% for s in STAGES %}{% set g = rows|selectattr('stage','equalto',s)|list %}<span class="tag t-{{ s }}">{{ s }} {{ g|length }} · {{ g|map(attribute='amount')|sum|money or '$0' }}</span>{% endfor %}<span style="flex:1"></span>
-{% if drafts %}<form method="post" action="{{ url_for('commission_send_all') }}" onsubmit="return confirm('给 {{ drafts|length }} 个代理发出本学期结算单？')"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="term" value="{{ term }}"><button class="btn">一键发出 {{ drafts|length }} 张草稿结算单</button></form>{% endif %}</div></div>
+<li><b>已付</b>登记付款日期和凭证，可自动通知代理</li></ol></details></div>
 <div class="row"><div class="card kpi"><div class="l">本学期已缴学费</div><div class="n">{{ fees|money or '$0' }}</div></div><div class="card kpi"><div class="l">本学期佣金合计</div><div class="n">{{ total|money or '$0' }}</div></div>
 <div class="card kpi"><div class="l">未付</div><div class="n">{{ rows|rejectattr('stage','equalto','已付')|rejectattr('stage','equalto','历史导入')|map(attribute='amount')|sum|money or '$0' }}</div></div></div>
 {% if term %}<div class="card"><h2>佣金总表（给会计付款用）</h2>

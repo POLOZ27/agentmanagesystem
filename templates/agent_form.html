@@ -1,5 +1,5 @@
 {% extends "base.html" %}{% block body %}<h1>{{ '新代理入驻' if new else '编辑代理：' ~ a.name }}</h1>
-<form method="post" action="{{ url_for('agent_new') if new else url_for('agent_detail', aid=a.id) }}" class="card"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<form method="post" action="{{ url_for('agent_new') if new else url_for('agent_detail', aid=a.id) }}" class="card" data-draft="agent"><input type="hidden" name="_csrf" value="{{ csrf }}">
 <h2>基本信息</h2><div class="grid">
 <div><label>代理名称 / 机构 *</label><input name="name" value="{{ a.name or '' }}" required></div>
 <div><label>公司法定名称（写进合同 Party B）</label><input name="legal_name" value="{{ a.legal_name or '' }}" placeholder="留空则用代理名称"></div>
@@ -20,6 +20,8 @@
 {% for k, v in LEVELS.items() %}<option value="{{ k }}" {{ 'selected' if a.level==k }}>{{ v.label }}</option>{% endfor %}<option value="" {{ 'selected' if not a.level }}>旧合同自定义比例</option></select></div></div>
 <div class="grid" id="custom">{% set r = a.rates or ['', '', ''] %}
 <div><label>Year One %</label><input name="rate_y1" value="{{ r[0] }}"></div><div><label>Year Two %</label><input name="rate_y2" value="{{ r[1] }}"></div><div><label>Year Three %</label><input name="rate_y3" value="{{ r[2] }}"></div></div>
+<div class="grid"><div><label>每个学生只付前几个学期（合同写「只付前两学期」就填 2；不限留空）</label><input name="pay_terms" value="{{ a.pay_terms or '' }}" inputmode="numeric" placeholder="不限"></div>
+<div><label>AP 课程佣金 %</label><input name="ap_rate" value="{{ a.ap_rate if a.ap_rate not in (none, '') else '' }}" placeholder="默认 10"></div></div>
 
 <h2 style="margin-top:20px">付款与合同</h2><div class="grid">
 <div><label>E-Transfer 地址</label><input name="etransfer" value="{{ a.etransfer or '' }}"></div>

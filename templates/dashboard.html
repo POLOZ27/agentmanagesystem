@@ -1,10 +1,13 @@
 {% extends "base.html" %}{% block body %}<h1>总览</h1>{% if t4a_due %}<div class="flash" style="background:var(--warnbg);color:var(--warn)">{{ t4a_due.year }} 年有 {{ t4a_due.n }} 个加拿大代理需要开 T4A，截止 {{ t4a_due.deadline }}。<a href="{{ url_for('payments', year=t4a_due.year) }}">去处理 →</a></div>{% endif %}
-<div class="row">
+<div class="card"><h2>待办 {% if todo %}<span class="tag t-warn">{{ todo|length }}</span>{% endif %}</h2>
+{% if todo %}<table>{% for icon, text, url, act in todo %}<tr><td style="width:28px">{{ icon }}</td><td>{{ text }}</td><td class="r" style="white-space:nowrap"><a class="btn ghost small" href="{{ url }}">{{ act }} →</a></td></tr>{% endfor %}</table>
+{% else %}<p class="mute" style="margin:0">今天没有要处理的事 👍</p>{% endif %}</div>
+<div class="row kpis">
 <div class="card kpi"><div class="l">活跃代理</div><div class="n">{{ active }}</div><div class="small mute">共 {{ agents|length }} 个代理</div></div>
 <div class="card kpi"><div class="l">{{ ay }} 学年佣金</div><div class="n">{{ ay_total|money or '$0' }}</div><div class="small mute">{{ ay_agents }} 个代理有学生 · 本学期（{{ cur }}）{{ cur_total|money or '$0' }}</div></div>
 <div class="card kpi"><div class="l">未结清佣金</div><div class="n">{{ open_rows|map(attribute='amount')|sum|money or '$0' }}</div><div class="small mute">{{ open_rows|length }} 张结算单</div></div>
 <div class="card kpi"><div class="l">在办的学生申请</div><div class="n"><a href="{{ url_for('students') }}" style="color:inherit">{{ open_students }}</a></div><div class="small mute">{{ ay }} 学年已入学 {{ enrolled_now }} 人</div></div>
-<div class="card kpi"><div class="l">开发中的潜在代理</div><div class="n">{{ prospects|rejectattr('stage','in',['已转为代理','不合适','待审核'])|list|length }}</div><div class="small mute">{{ followups|length }} 个该跟进了</div></div></div>
+<div class="card kpi"><div class="l">开发中的潜在代理</div><div class="n"><a href="{{ url_for('prospects') }}" style="color:inherit">{{ prospects|rejectattr('stage','in',['已转为代理','不合适','待审核'])|list|length }}</a></div><div class="small mute">{{ followups|length }} 个该跟进了</div></div></div>
 
 <div class="card"><div class="toolbar"><h2 style="margin:0">佣金结算进度</h2><span style="flex:1"></span><a class="small" href="{{ url_for('commissions') }}">去结算 →</a></div>
 <ol class="flow">{% for s in STAGES[:-1] %}<li><b>{{ s }} · {{ stage_counts[s]|length }}</b>{{ stage_counts[s]|map(attribute='amount')|sum|money or '$0' }}</li>{% endfor %}<li class="done"><b>已付</b>完成</li></ol>
@@ -22,6 +25,6 @@
 <div class="card"><div class="toolbar"><h2 style="margin:0">合同即将到期 / 已过期</h2><span style="flex:1"></span><a class="small" href="{{ url_for('renewals') }}">去续签 →</a></div><table>{% for a in expiring[:8] %}{% set d = days_left(a.contract_expiry) %}
 <tr><td><a href="{{ url_for('agent_detail', aid=a.id) }}">{{ a.name }}</a> <span class="mute small">{{ a.code }}</span></td><td>{{ a.contract_expiry }}</td>
 <td><span class="tag {{ 't-bad' if d < 0 else 't-warn' }}">{{ '已过期 %d 天'|format(-d) if d < 0 else '%d 天后'|format(d) }}</span>{% if a.renewal and a.renewal.sent %} <span class="tag t-已发结算单">续签已发</span>{% elif a.renewal %} <span class="tag">续签已准备</span>{% endif %}</td></tr>{% else %}<tr><td class="mute">暂无</td></tr>{% endfor %}</table></div></div>
-<div class="row"><div class="card"><h2>定时 News 推送</h2><table>{% for c in campaigns %}<tr><td>{{ c.subject }}</td><td class="small">{{ c.cadence }}</td><td class="small mute">下次 {{ c.next_at|replace('T',' ') }}</td></tr>{% else %}<tr><td class="mute">暂无</td></tr>{% endfor %}</table></div>
+<div class="row"><div class="card"><h2>定时 News 推送</h2><table>{% for c in campaigns %}<tr><td>{{ c.subject }}</td><td class="small">{{ c.cadence }}</td><td class="small">{% if campaign_overdue(c) %}<span class="tag t-bad">过期未发</span>{% else %}<span class="mute">下次 {{ c.next_at|replace('T',' ') }}</span>{% endif %}</td></tr>{% else %}<tr><td class="mute">暂无</td></tr>{% endfor %}</table></div>
 <div class="card"><h2>最新来信</h2><table>{% for m in inbox %}<tr><td><a href="{{ url_for('mail_msg', mid=m.id) }}">{{ m.subject }}</a></td><td class="small mute">{{ agents[m.agent_id].name if m.agent_id in agents else m['from'] }}</td></tr>{% else %}<tr><td class="mute">暂无</td></tr>{% endfor %}</table></div></div>
 {% endblock %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block title %}预览邮件{% endblock %}{% block body %}<h1>预览：发给 {{ samples|length }} 个代理</h1>
+<form method="post" id="pv"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<input type="hidden" name="subject" value="{{ c.subject }}"><textarea name="body" hidden>{{ c.body }}</textarea>
+<input type="hidden" name="cadence" value="{{ c.cadence }}"><input type="hidden" name="send_at" value="{{ c.send_at }}"><input type="hidden" name="sender" value="{{ c.sender or '' }}">
+{% for x in samples %}<input type="hidden" name="agent_ids" value="{{ x.a.id }}">{% endfor %}
+<div class="card"><div class="toolbar" style="flex-wrap:wrap"><h2 style="margin:0">每封都会按代理替换称呼</h2><span style="flex:1"></span>
+<label class="small" style="margin:0">看哪一封</label><select id="pick" style="width:auto;max-width:320px">{% for x in samples %}<option value="{{ loop.index0 }}">{{ x.a.code or '' }} {{ x.a.name }} · {{ x.a.email }}</option>{% endfor %}</select></div>
+{% for x in samples %}<div class="sample" data-i="{{ loop.index0 }}" {{ '' if loop.first else 'hidden' }}>
+<p class="small mute">发件：{{ sender or '（演示模式，不会真正发出）' }} · 收件：{{ x.a.email }}</p>
+<p><b>{{ x.subject }}</b></p><pre style="white-space:pre-wrap;font:inherit;border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--head)">{{ x.body }}</pre></div>{% endfor %}</div>
+<div class="card"><h2>先发一封给自己看看（可选）</h2><div class="inline"><div style="flex:2"><label>测试邮件发到</label><input name="test_to" value="{{ test_to }}"></div>
+<div><button class="btn ghost" name="action" value="test">发测试邮件</button></div></div>
+<p class="small mute" style="margin:6px 0 0">测试邮件标题前面会加「[测试]」，用第一个代理的称呼替换，不会发给任何代理。</p></div>
+<div class="card"><h2>收件人（{{ samples|length }} 个）</h2><p class="small">{% for x in samples %}{{ x.a.name }}{{ '、' if not loop.last }}{% endfor %}</p>
+<p>{% if c.cadence == '立即发送' and not c.send_at %}<button class="btn" name="action" value="send" onclick="return confirm('确认把这封邮件发给 {{ samples|length }} 个代理？发出后不能撤回。')">✉ 确认发送给 {{ samples|length }} 个代理</button>
+{% else %}<button class="btn" name="action" value="send">确认创建定时推送（{{ c.cadence }}{{ '，首次 ' ~ c.send_at|replace('T',' ') if c.send_at }}）</button>{% endif %}
+<button class="btn ghost" name="action" value="edit" formnovalidate>← 返回修改</button></p></div></form>
+<script>document.getElementById('pick').onchange=e=>document.querySelectorAll('.sample').forEach(d=>d.hidden=d.dataset.i!==e.target.value);</script>{% endblock %}
