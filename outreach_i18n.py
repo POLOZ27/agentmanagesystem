@@ -598,15 +598,17 @@ def lang_for(country):
 
 def fill_links(text, kit_link=""):
     """{link} 换成预约链接，{kit_link} 换成资料包链接（没设置时保留原样，发信前会被拦下）。"""
+    text = (text or "").replace("{预约链接}", "{link}").replace("{资料包链接}", "{kit_link}")
+    text = text.replace("{联系人}", "{name}").replace("{代理名称}", "{agency}")  # 中文写法和写邮件页一样
     text = text.replace("{link}", LINK)
     return text.replace("{kit_link}", kit_link) if kit_link else text
 
 
 def unfilled(*texts):
-    """发信前还没填的占位符（{name}、{agency} 会自动换，不算）。"""
+    """发信前还没填的占位符（{name}、{agency} 会自动换，不算；写错的、中文的也算进来）。"""
     left = set()
     for t in texts:
-        left |= set(re.findall(r"\{([a-z_]+)\}", t or ""))
+        left |= set(re.findall(r"\{([^{}\s]{1,24})\}", fill_links(t or "")))
     return sorted(left - {"name", "agency"})
 
 
@@ -617,11 +619,11 @@ def compose(prospect, english=None, translation=None, kit_link=""):
         else prospect.get("agency", "Education Partner")
     lang = lang_for(prospect.get("country"))
     agency = prospect.get("agency") or "your agency"
-    body = english["body"].replace("{name}", name).replace("{agency}", agency)
+    body = fill_links(english["body"]).replace("{name}", name).replace("{agency}", agency)
     subject = english["subject"]
     tr = TRANSLATIONS.get(lang) if translation is None else translation  # False = 只发英文
     if tr:
-        body += f"\n\n———— {tr['label']} ————\n\n" + tr["body"].replace("{name}", name).replace("{agency}", agency)
+        body += f"\n\n———— {tr['label']} ————\n\n" + fill_links(tr["body"]).replace("{name}", name).replace("{agency}", agency)
     return fill_links(subject, kit_link), fill_links(body, kit_link) + UNSUBSCRIBE, lang
 
 

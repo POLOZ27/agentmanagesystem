@@ -1,6 +1,8 @@
 {% extends "base.html" %}{% block title %}预览结算邮件{% endblock %}{% block body %}
 <div class="toolbar" style="flex-wrap:wrap"><h1 style="margin:0">{{ '发出的' if c.locked else '预览' }}结算邮件 · {{ a.name }}</h1><span class="mute">{{ c.term }}</span><span class="tag t-{{ c.stage }}">{{ c.stage }}</span><span style="flex:1"></span>
 <a class="btn ghost" href="{{ url_for('commission_edit', cid=c.id) }}">回到结算单</a></div>
+{% if qinfo %}<div class="flash" style="background:var(--brand2);color:var(--ink)">逐张发出 {{ qinfo.term }}：这张看过没问题就点下面的「确认发出」，发完自动打开下一张。还剩 <b>{{ qinfo.left }}</b> 张（含这张）。
+<a class="btn ghost small" href="{{ url_for('commission_queue', term=qinfo.term, skip=qinfo.skip_next) }}">先跳过这张 →</a> <a class="small" href="{{ url_for('commissions', term=qinfo.term) }}">停下，回到佣金结算</a></div>{% endif %}
 
 <div class="card"><h2>邮件</h2>
 {% if c.locked %}<p class="small mute">{{ c.sent_on }} 已发出，下面是发出时的内容。</p>{% endif %}
@@ -28,7 +30,8 @@
 {% if not c.locked %}<div class="card"><h2>发出</h2>
 <p>佣金合计 <b>{{ c.calc|money }}</b> · {{ c.students|length }} 名学生 · 收件人 {{ m.to or '（还没填）' }}</p>
 <form method="post" action="{{ url_for('commission_send', cid=c.id) }}" onsubmit="return confirm('确认把邮件和附件发给 {{ m.to }}？发出后金额锁定。')"><input type="hidden" name="_csrf" value="{{ csrf }}">
+{% if qinfo %}<input type="hidden" name="queue" value="{{ qinfo.term }}"><input type="hidden" name="skip" value="{{ qinfo.skip }}">{% endif %}
 <div class="grid">{% with kind = "statement" %}{% include "_sender.html" %}{% endwith %}</div>
-<button class="btn" {{ 'disabled' if not m.to or not c.lines }}>确认发出</button> <span class="small mute">先点上面的「保存修改」再发；没保存的改动不会发出</span></form></div>{% endif %}
+<button class="btn" {{ 'disabled' if not m.to or not c.lines }}>确认发出{{ '，打开下一张' if qinfo and qinfo.left > 1 }}</button> <span class="small mute">先点上面的「保存修改」再发；没保存的改动不会发出</span></form></div>{% endif %}
 <script>document.querySelectorAll('.sheet-tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.sheet').forEach(d=>d.style.display=d.dataset.i===b.dataset.i?'':'none');document.querySelectorAll('.sheet-tab').forEach(x=>x.classList.toggle('ghost',x!==b));});</script>
 {% endblock %}

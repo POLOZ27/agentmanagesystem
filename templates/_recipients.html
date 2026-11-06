@@ -14,4 +14,4 @@ box.querySelector('.rp-all').onclick=()=>{box.querySelectorAll('.rp-r').forEach(
 box.querySelector('.rp-none').onclick=()=>{box.querySelectorAll('.rp-r').forEach(r=>r.checked=false);sync()};
 box.querySelectorAll('.rp-r').forEach(r=>r.onchange=()=>{const g=box.querySelector('.rp-g[data-r="'+CSS.escape(r.value)+'"]');if(r.checked&&!g.querySelector('.rp-p:checked'))g.querySelectorAll('.rp-p').forEach(i=>i.checked=true);sync()});
 box.querySelectorAll('.rp-gall,.rp-gnone').forEach(a=>a.onclick=e=>{e.preventDefault();a.closest('.rp-g').querySelectorAll('.rp-p').forEach(i=>i.checked=a.classList.contains('rp-gall'));sync()});
-box.querySelectorAll('.rp-p').forEach(i=>i.onchange=sync);sync();window.rpCount=()=>box.querySelectorAll('.rp-p:checked:not(:disabled)').length;})();</script>
+box.querySelectorAll('.rp-p').forEach(i=>i.onchange=sync);sync();document.addEventListener('DOMContentLoaded',sync);window.rpCount=()=>box.querySelectorAll('.rp-p:checked:not(:disabled)').length;})();</script>

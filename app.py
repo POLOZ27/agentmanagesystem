@@ -7,6 +7,7 @@ import secrets
 import tempfile
 import time
 from functools import wraps
+from urllib.parse import urlparse
 
 import openpyxl
 import pyotp
@@ -20,6 +21,7 @@ import ai
 import portal
 import backup
 import tax
+import version
 import local_ai
 import contracts
 import email_templates as et
@@ -71,8 +73,13 @@ def login_required(f):
             return redirect(url_for("setup"))
         last = session.get("seen", 0)
         if not session.get("ok") or not vault.unlocked or time.time() - last > IDLE_MINUTES * 60:
+            timed_out = bool(session.get("ok"))
             session.clear()
-            return redirect(url_for("login"))
+            if timed_out:
+                flash(f"超过 {IDLE_MINUTES} 分钟没有操作，已自动退出。没提交成功的邮件和结算单内容暂存在浏览器里，登录后回到原页面可以恢复。")
+            nxt = request.full_path if request.method == "GET" else (request.referrer or "")
+            nxt = urlparse(nxt)._replace(scheme="", netloc="").geturl() if nxt else ""
+            return redirect(url_for("login", next=nxt) if nxt.startswith("/") and not nxt.startswith("//") else url_for("login"))
         session["seen"] = time.time()
         return f(*a, **kw)
     return wrapper
@@ -97,7 +104,9 @@ def csrf():
 def ctx():
     session.setdefault("csrf", secrets.token_hex(16))
     n_inbox = sum(b["complete"] for b in inbox.bundles(vault)) if vault.unlocked and session.get("ok") else 0
-    return {"csrf": session["csrf"], "scheme_label": scheme_label, "unlocked": vault.unlocked, "portal_on": portal.enabled(),
+    return {"csrf": session["csrf"], "scheme_label": scheme_label, "IDLE_MINUTES": IDLE_MINUTES,
+            "today_iso": dt.date.today().isoformat(),
+            "clear_draft": session.pop("clear_draft", None) if session.get("ok") else None, "unlocked": vault.unlocked, "portal_on": portal.enabled(),
             "inbox_n": n_inbox, "parent_url": parent_url() if session.get("ok") else None,
             "mail_accounts": lambda: mailer.accounts(settings()), "MAIL_KINDS": mailer.MAIL_KINDS,
             "default_sender": lambda kind: (mailer.account_for(settings(), kind) or {}).get("user")}
@@ -196,17 +205,22 @@ def login():
         _failed[:] = [t for t in _failed if now - t < 900]
         if len(_failed) >= 5:
             flash("失败次数过多，请 15 分钟后再试")
-            return redirect(url_for("login"))
+            return redirect(url_for("login", next=request.args.get("next")))
         dek = vault.try_unwrap(request.form["password"])
         trusted = device_trusted()
         if not dek or not (trusted or pyotp.TOTP(vault.totp_secret(dek)).verify(request.form.get("code", ""), valid_window=1)):
             _failed.append(now)
             vault.audit("login failed")
             flash("密码或验证码错误")
-            return redirect(url_for("login"))
+            return redirect(url_for("login", next=request.args.get("next")))
         if not vault.unlocked:
             vault.unlock(dek)
         inbox.ensure_key(vault)
+        _lock["since"] = None
+        try:
+            save_lock_notify()
+        except Exception:  # noqa: BLE001
+            app.logger.exception("save_lock_notify")
         vault.audit("login ok")
         try:
             refresh_old_drafts()
@@ -214,7 +228,8 @@ def login():
             app.logger.exception("refresh_old_drafts")
         session.clear()
         session.update(ok=True, seen=now, csrf=secrets.token_hex(16))
-        resp = redirect(url_for("dashboard"))
+        nxt = request.args.get("next") or ""
+        resp = redirect(nxt if nxt.startswith("/") and not nxt.startswith(("//", "/login", "/logout")) else url_for("dashboard"))
         if not trusted and request.form.get("remember"):
             tok = secrets.token_urlsafe(32)
             rows = _trusted_load()
@@ -228,6 +243,13 @@ def login():
     return render_template("login.html", trusted=device_trusted(), trust_days=TRUST_DAYS)
 
 
+@app.route("/ping")
+@login_required
+def ping():
+    """页面上「继续使用」按钮：只是刷新一下登录时间。"""
+    return {"ok": True, "idle_minutes": IDLE_MINUTES}
+
+
 @app.route("/logout")
 def logout():
     session.clear()
@@ -238,6 +260,7 @@ def logout():
 @login_required
 def lock():
     vault.lock()
+    _lock["since"] = time.time() + 365 * 86400  # 自己点「锁定」的不发提醒
     session.clear()
     flash("保险库已锁定：内存中的密钥已清除，定时邮件暂停，需要重新登录解锁。")
     return redirect(url_for("login"))
@@ -252,7 +275,7 @@ def terms():
     """所有学期，按先后排：结算单里出现过的 + 自己新建的（还没有结算单的学期）。"""
     seen = {}
     for c in vault.all("commission"):
-        seen[c["term"]] = max(seen.get(c["term"], -1), c.get("term_order", 999))
+        seen[c["term"]] = min(seen.get(c["term"], 999), c.get("term_order", 999))  # 个别结算单缺顺序时不打乱学期先后
     for t in vault.all("term"):
         seen.setdefault(t["name"], t.get("order", 999))
     return [t for t, _ in sorted(seen.items(), key=lambda x: x[1])]
@@ -331,10 +354,22 @@ def mark_step(a, key):
 
 
 app.jinja_env.filters["money"] = money
+app.jinja_env.globals["campaign_overdue"] = mailer.overdue
+
+
+def qs(**over):
+    """当前页面的查询参数，改掉其中几个（值为 None 的去掉）。"""
+    from urllib.parse import urlencode
+    args = request.args.to_dict()
+    args.update(over)
+    return "?" + urlencode({k: v for k, v in args.items() if v not in (None, "")})
+
+
+app.jinja_env.globals["qs"] = qs
 app.jinja_env.globals.update(days_left=days_left, agent_scheme=agent_scheme, STATUSES=STATUSES, STAGES=STAGES, LEVELS=LEVELS, PROGRAMS=PROGRAMS,
                              ONBOARDING=ONBOARDING, onboarding_step=onboarding_step, PROSPECT_STAGES=PROSPECT_STAGES,
                              COUNTRY_ZH=i18n.COUNTRY_ZH, STUDENT_STAGES=STUDENT_STAGES, STUDENT_HINTS=STUDENT_HINTS,
-                             LANG_LABELS=i18n.LANG_LABELS, lang_for=i18n.lang_for)
+                             LANG_LABELS=i18n.LANG_LABELS, lang_for=i18n.lang_for, ENROLL_STATUSES=["在读", "毕业", "离校", "转校"])
 
 
 def settings():
@@ -383,7 +418,39 @@ def dashboard():
         need = [x for x in tax.summarize(today.year - 1, rows, agents) if x["t4a"]]
         if need:
             t4a_due = {"year": today.year - 1, "n": len(need), "deadline": tax.deadline(today.year - 1)}
-    return render_template("dashboard.html", agents=agents, cur=cur, cur_rows=cur_rows, t4a_due=t4a_due,
+    todo = []  # 「今天要做的事」：每类一行，有事才显示
+    unassigned = [x for x in studs if (x.get("web_no") or x.get("agent_hint")) and x.get("uses_agent") and not x.get("agent_id")]
+    if unassigned:
+        todo.append(("🎓", f"{len(unassigned)} 个学生选了代理但还没对上", url_for("students", stage="待分配"), "去分配"))
+    no_stmt = [x for x in studs if x.get("stage") == "已入学" and x.get("agent_id") and not x.get("commission_id")
+               and academic_year(x.get("intake") or "") == ay]
+    if no_stmt:
+        todo.append(("💲", f"{len(no_stmt)} 个本学年已入学的学生还没进结算单", url_for("students", stage="已入学"), "去加入"))
+    unread = sum(1 for m in vault.all("mail") if m["direction"] == "in" and m.get("status") == "未读")
+    if unread:
+        todo.append(("✉️", f"{unread} 封未读来信", url_for("mail", unread=1), "去看"))
+    for kind, r, i, e in due_followups()[:6]:
+        ep, arg = {"agent": ("agent_detail", "aid"), "student": ("student_edit", "sid"), "prospect": ("prospect_detail", "pid")}[kind]
+        todo.append(("📞", f"跟进 {r.get('name') or r.get('agency')}：{e['text'][:40]}（{e['next']}）", url_for(ep, **{arg: r["id"]}) + "#notes", "打开"))
+    fu = [p for p in prospects if needs_followup(p)]
+    if fu:
+        todo.append(("🔎", f"{len(fu)} 个潜在代理发信 7 天没回，该跟进了", url_for("outreach", kind="followup", ids=[p["id"] for p in fu]), "发跟进邮件"))
+    drafts = [r for r in cur_rows if r["stage"] == "草稿" and not r.get("imported") and r.get("students")]
+    if drafts:
+        todo.append(("📤", f"{cur} 有 {len(drafts)} 张草稿结算单还没发", url_for("commission_queue", term=cur), "逐张预览发出"))
+    conf = [r for r in open_rows if r["stage"] == "代理已确认"]
+    if conf:
+        todo.append(("🧾", f"{len(conf)} 张结算单代理已确认，还没交会计", url_for("commissions", term=conf[0]["term"]), "去交会计"))
+    exp30 = [a for a in expiring if days_left(a["contract_expiry"]) <= 30 and not (a.get("renewal") or {}).get("sent")]
+    if exp30:
+        todo.append(("📄", f"{len(exp30)} 份合同 30 天内到期（或已过期）还没发续签", url_for("renewals"), "去续签"))
+    late = [c for c in vault.all("campaign") if mailer.overdue(c)]
+    if late:
+        todo.append(("⏰", f"{len(late)} 条定时推送过了时间没发出", url_for("mail"), "补发或跳过"))
+    bh = backup_health()
+    if bh:
+        todo.append(("💾", bh, url_for("settings_page") + "#safe", "去看"))
+    return render_template("dashboard.html", agents=agents, cur=cur, cur_rows=cur_rows, t4a_due=t4a_due, todo=todo,
                            open_students=sum(1 for x in studs if x.get("stage") not in ("已入学", "未入学")),
                            enrolled_now=sum(1 for x in studs if x.get("stage") == "已入学" and academic_year(x.get("intake") or "") == ay),
                            ay=ay, ay_total=sum(r["amount"] for r in ay_rows), ay_agents=len({r["agent_id"] for r in ay_rows}),
@@ -399,23 +466,61 @@ def dashboard():
 
 
 # ---------- 代理 ----------
+AGENT_TABS = [("work", "合作中", ("活跃", "已签约")), ("onboard", "入驻中", ("潜在", "洽谈中")),
+              ("off", "不活跃 / 终止", ("不活跃", "终止")), ("all", "全部", None)]
+
+
+def short_scheme(a):
+    """佣金方案统一写法：标准级 20/25%、高级 25/30%、旧合同 25% 或 25/10/5%。"""
+    if a.get("level") in LEVELS:
+        lv = LEVELS[a["level"]]
+        return f"{'标准级' if a['level'] == 'standard' else '高级'} {lv['y1']:g}/{lv['y1_6']:g}%"
+    r = a.get("rates")
+    if not r:
+        return a.get("scheme_text") or "未设置"
+    return "旧合同 " + (f"{r[0]:g}%" if r[0] == r[1] == r[2] else "/".join(f"{x:g}" for x in r) + "%")
+
+
 @app.route("/agents")
 @login_required
 def agents_list():
     q = request.args.get("q", "").strip().lower()
     st = request.args.get("status", "")
+    tab = request.args.get("tab") or ("all" if st or q else "work")
+    sort = request.args.get("sort") or "code"
     by_id = agents_by_id()
     comms = vault.all("commission")
     earned = {}
     for c in comms:
         earned[c["agent_id"]] = earned.get(c["agent_id"], 0) + enrich(c, by_id, comms)["amount"]
-    agents = sorted(vault.all("agent"), key=lambda a: a.get("code") or "J9" + a["name"])
+    ay = current_ay()
+    ay_students = {}
+    for c in comms:
+        if academic_year(c["term"]) == ay:
+            for r in c.get("students") or []:
+                ay_students.setdefault(c["agent_id"], set()).add(r.get("student_id") or _name_key(r.get("name")))
+    for x in vault.all("student"):
+        if x.get("agent_id") and x.get("stage") == "已入学" and academic_year(x.get("intake") or "") == ay:
+            ay_students.setdefault(x["agent_id"], set()).add(x["id"])
+    ay_n = {k: len(v) for k, v in ay_students.items()}
+    allg = vault.all("agent")
+    counts = {k: sum(1 for a in allg if sts is None or a.get("status") in sts) for k, _, sts in AGENT_TABS}
+    agents = allg
+    sts = dict((k, v) for k, _, v in AGENT_TABS).get(tab)
+    if sts:
+        agents = [a for a in agents if a.get("status") in sts]
     if q:
         agents = [a for a in agents if q in " ".join(str(a.get(k, "")) for k in
                                                      ("name", "code", "email", "contact", "country", "payee")).lower()]
     if st:
         agents = [a for a in agents if a.get("status") == st]
-    return render_template("agents.html", agents=agents, earned=earned, q=q, st=st)
+    keys = {"code": lambda a: a.get("code") or "J9" + a["name"], "name": lambda a: a.get("name", "").lower(),
+            "country": lambda a: (a.get("country") or "~").lower(), "status": lambda a: STATUSES.index(a["status"]) if a.get("status") in STATUSES else 9,
+            "expiry": lambda a: a.get("contract_expiry") or "9999", "earned": lambda a: -earned.get(a["id"], 0),
+            "ay": lambda a: -ay_n.get(a["id"], 0)}
+    agents = sorted(agents, key=keys.get(sort, keys["code"]))
+    return render_template("agents.html", agents=agents, earned=earned, q=q, st=st, tab=tab, tabs=AGENT_TABS, counts=counts,
+                           sort=sort, ay=ay, ay_n=ay_n, short_scheme=short_scheme)
 
 
 def agent_from_form(a, f):
@@ -425,6 +530,15 @@ def agent_from_form(a, f):
         if k in f:
             a[k] = f.get(k, "").strip()
     a["contract_expiry"] = a.get("contract_expiry") or None
+    if "pay_terms" in f:
+        v = re.sub(r"\D", "", f.get("pay_terms") or "")
+        a["pay_terms"] = int(v) if v else None
+    if "ap_rate" in f:
+        v = (f.get("ap_rate") or "").strip().rstrip("%")
+        try:
+            a["ap_rate"] = float(v) if v else a.get("ap_rate", "")
+        except ValueError:
+            pass
     if a.get("level") in LEVELS:
         a["rates"] = [LEVELS[a["level"]]["y1"], LEVELS[a["level"]]["y2"], LEVELS[a["level"]]["y3"]]
     else:
@@ -435,12 +549,55 @@ def agent_from_form(a, f):
     return a
 
 
+# ---------- 跟进记录（代理、学生、潜在代理都有）：打过电话、见过面、谈了什么，可设下次跟进日 ----------
+NOTE_KINDS = {"agent": "agent_detail", "student": "student_edit", "prospect": "prospect_detail"}
+
+
+@app.post("/notes/<kind>/<rid>")
+@login_required
+def notes_post(kind, rid):
+    if kind not in NOTE_KINDS:
+        abort(404)
+    r = vault.get(kind, rid) or abort(404)
+    log = r.setdefault("log", [])
+    act = request.form.get("act") or "add"
+    i = request.form.get("i", type=int)
+    if act == "add":
+        text = (request.form.get("text") or "").strip()
+        if text:
+            session["clear_draft"] = "note"
+            log.append({"at": dt.datetime.now().isoformat(timespec="minutes"), "text": text[:2000],
+                        "next": request.form.get("next") or ""})
+            flash("已记下" + (f"，{request.form['next']} 会在总览「待办」里提醒你" if request.form.get("next") else ""))
+    elif i is not None and 0 <= i < len(log):
+        if act == "done":
+            log[i]["done"] = dt.date.today().isoformat()
+        elif act == "delete":
+            log.pop(i)
+    vault.put(kind, r)
+    arg = {"agent": "aid", "student": "sid", "prospect": "pid"}[kind]
+    return redirect(url_for(NOTE_KINDS[kind], **{arg: rid}) + "#notes")
+
+
+def due_followups():
+    """所有到了「下次跟进日」还没标完成的记录：[(类型, 记录, 第几条, 条目)]。"""
+    today = dt.date.today().isoformat()
+    out = []
+    for kind in NOTE_KINDS:
+        for r in vault.all(kind):
+            for i, e in enumerate(r.get("log") or []):
+                if e.get("next") and e["next"] <= today and not e.get("done"):
+                    out.append((kind, r, i, e))
+    return sorted(out, key=lambda x: x[3]["next"])
+
+
 @app.route("/agents/new", methods=["GET", "POST"])
 @login_required
 def agent_new():
     if request.method == "POST":
         a = agent_from_form({"created": dt.date.today().isoformat(), "contracts": [], "onboarding": {}}, request.form)
         a = vault.put("agent", a)
+        session["clear_draft"] = "agent"
         flash(f"已新建代理 {a['name']}")
         return redirect(url_for("agent_detail", aid=a["id"]))
     return render_template("agent_form.html", a={"code": next_code(), "status": "洽谈中", "level": "standard"}, new=True)
@@ -453,6 +610,7 @@ def agent_detail(aid):
     if request.method == "POST":
         agent_from_form(a, request.form)
         vault.put("agent", a)
+        session["clear_draft"] = "agent"
         flash("已保存")
         return redirect(url_for("agent_detail", aid=aid))
     comms = vault.all("commission")
@@ -482,6 +640,21 @@ def trash_contract(a, c, why):
     if c.get("fid"):
         vault.put("trash", {"type": "contract", "agent_id": a["id"], "label": f"{a.get('name', '')} · {c.get('name', '')}",
                             "why": why, "c": c, "at": time.time()})
+
+
+TRASH_KINDS = {"student": "🎓 学生", "commission": "💲 结算单", "prospect": "🔎 潜在代理", "template": "✉️ 邮件模板",
+               "asset": "📁 宣传资料", "campaign": "⏰ 定时推送"}
+
+
+def to_trash(kind, rec, label, why="手动删除"):
+    """删除任何记录都先放进回收站（30 天内可以恢复）。文件不删，恢复后还能用。"""
+    vault.put("trash", {"type": "record", "kind": kind, "rec": rec, "label": label, "why": why, "fids": [],
+                        "at": time.time()})
+    vault.delete(kind, rec["id"])
+    vault.audit(f"{kind} deleted (to trash)")
+
+
+app.jinja_env.globals["TRASH_KINDS"] = TRASH_KINDS
 
 
 def purge_trash():
@@ -516,6 +689,8 @@ def trash_restore(tid):
         c = dict(t["c"], kind="已恢复" if t["c"].get("kind") in ("续签待签", "待签（系统生成）") else t["c"].get("kind"))
         a.setdefault("contracts", []).append(c)
         vault.put("agent", a)
+    elif t["type"] == "record":
+        vault.put(t["kind"], t["rec"])
     else:
         vault.put("agent", t["agent"])
         for kind, recs in (t.get("records") or {}).items():
@@ -570,6 +745,10 @@ def agent_onboarding(aid):
     a = vault.get("agent", aid) or abort(404)
     old = a.get("onboarding") or {}
     a["onboarding"] = {k: old.get(k) or dt.date.today().isoformat() for k, _, _ in ONBOARDING if request.form.get(k)}
+    lv = request.form.get("level")
+    if lv in LEVELS:  # 第 4 步「确定等级」在这里选好，第 5 步生成合同直接用
+        a["level"] = lv
+        a["rates"] = [LEVELS[lv]["y1"], LEVELS[lv]["y2"], LEVELS[lv]["y3"]]
     if "signed" in a["onboarding"] and a.get("status") in ("潜在", "洽谈中"):
         a["status"] = "已签约"
     vault.put("agent", a)
@@ -764,6 +943,106 @@ def term_delete():
     return redirect(url_for("commissions"))
 
 
+# ---------- 在读学生名册：续读学生每学期自动带进结算单 ----------
+ENROLL_STATUSES = ["在读", "毕业", "离校", "转校"]
+
+
+def term_pos(term, ts=None):
+    """学期先后：在学期列表里的按列表；不在列表里的按学年估一个位置。"""
+    ts = ts if ts is not None else terms()
+    if term in ts:
+        return ts.index(term)
+    ay = academic_year(term or "")
+    same = [i for i, t in enumerate(ts) if academic_year(t) == ay]
+    return (same[0] - 0.5) if same else -1
+
+
+def student_rows(st, comms, agent_id=None):
+    """这个学生在以前各张结算单里的行：[(结算单, 行)]（按学生 ID 对，没 ID 的按名字对，只看同一个代理）。"""
+    k = _name_key(st.get("name"))
+    out = []
+    for c in comms:
+        if agent_id and c.get("agent_id") != agent_id:
+            continue
+        for r in c.get("students") or []:
+            if r.get("student_id") == st["id"] or (not r.get("student_id") and _name_key(r.get("name")) == k):
+                out.append((c, r))
+    return out
+
+
+def suggest_row(st, term, agent, comms):
+    """续读学生这个学期在结算单里应该怎么写：第几年、第几个学期、付不付、学费先沿用上一期。"""
+    ts = terms()
+    here = term_pos(term, ts)
+    before = sorted([(c, r) for c, r in student_rows(st, comms, agent.get("id")) if term_pos(c["term"], ts) < here],
+                    key=lambda x: term_pos(x[0]["term"], ts))
+    program = st.get("program") or "FT1"
+    first = before[0][0]["term"] if before else (st.get("intake") or term)
+    if program in ("FT1", "FT2", "FT3"):
+        try:
+            years = int(academic_year(term)[:2]) - int(academic_year(first)[:2])
+        except ValueError:
+            years = 0
+        base = int(program[2]) if not before else int((before[0][1].get("program") or "FT1")[2:] or 1)
+        program = f"FT{min(3, max(1, base + max(0, years)))}"
+    paid = sum(1 for _, r in before if not r.get("nopay"))
+    term_no = len({c["term"] for c, _ in before}) + 1
+    nopay, note = False, ""
+    limit = agent.get("pay_terms")
+    if limit and paid >= int(limit):
+        nopay, note = True, f"合同只付前 {limit} 个学期，已付 {paid} 个"
+    elif program in ("PT", "AP") and paid >= 1:
+        nopay, note = True, "兼职 / AP 只在首次缴费时付佣金"
+    tuition = before[-1][1].get("tuition") if before else st.get("tuition")
+    return {"name": st.get("name", ""), "program": program, "courses": st.get("courses") or "",
+            "origin": st.get("origin") or "International", "tuition": tuition if tuition is not None else 0,
+            "note": note or ("学费沿用上一期，请核对" if before else ""), "rate": None, "nopay": nopay,
+            "term_no": term_no, "student_id": st["id"]}
+
+
+def roster_candidates(term):
+    """这个学期应该进结算单的在读学生：已入学、还在读、有代理、入学学期不晚于这个学期。"""
+    ts = terms()
+    here = term_pos(term, ts)
+    agents = agents_by_id()
+    out = []
+    for st in vault.all("student"):
+        a = agents.get(st.get("agent_id") or "")
+        if not a or a.get("status") == "终止" or st.get("stage") != "已入学":
+            continue
+        if (st.get("enrolled_status") or "在读") != "在读":
+            continue
+        if st.get("intake") and term_pos(st["intake"], ts) > here:
+            continue
+        out.append((st, a))
+    return out
+
+
+def link_statement_students(c):
+    """结算单里手打的学生名字，能和学生名册对上的就关联起来（同一个人不同写法也算），统计和满 6 人才不会算错。"""
+    pool = vault.all("student")
+    mine = [x for x in pool if x.get("agent_id") == c.get("agent_id")]
+    changed = False
+    for row in c.get("students") or []:
+        if row.get("student_id") and vault.get("student", row["student_id"]):
+            continue
+        hit = _student_match(row.get("name"), mine) or _student_match(row.get("name"), pool)
+        if hit:
+            row["student_id"] = hit["id"]
+            changed = True
+            if not hit.get("commission_id"):
+                hit["commission_id"] = c["id"]
+                vault.put("student", hit)
+    if changed:
+        vault.put("commission", c)
+    return c
+
+
+def find_statement(agent_id, term, not_id=None):
+    return next((x for x in vault.all("commission") if x.get("agent_id") == agent_id and x.get("term") == term
+                 and x["id"] != not_id), None)
+
+
 def statement_form(c, f):
     c["agent_id"], c["term"] = f["agent_id"], f["term"].strip()
     orders = {t: i for i, t in enumerate(terms())}
@@ -777,6 +1056,13 @@ def statement_form(c, f):
                          "courses": f.getlist("s_courses")[i].strip(), "origin": f.getlist("s_origin")[i],
                          "tuition": tuition, "note": f.getlist("s_note")[i].strip(),
                          "rate": fnum(f.getlist("s_rate")[i])})
+        sids = f.getlist("s_sid")
+        if i < len(sids) and sids[i]:
+            students[-1]["student_id"] = sids[i]
+        old = next((x for x in c.get("students") or [] if x.get("name") == name.strip()), {})
+        for k in ("period", "grade", "term_no"):  # 页面上没有的栏，保存时保留
+            if old.get(k) not in (None, ""):
+                students[-1][k] = old[k]
         pay = f.getlist("s_pay")
         if i < len(pay) and pay[i] == "0":
             students[-1]["nopay"] = True
@@ -800,40 +1086,102 @@ def commission_edit(cid=None):
     if c is None:
         abort(404)
     agents = sorted(vault.all("agent"), key=lambda a: a.get("code") or "J9")
+    if not cid and c.get("agent_id"):  # 这个代理这个学期已经有结算单了：直接打开那张，不再新建第二张
+        dup = find_statement(c["agent_id"], c["term"])
+        if dup:
+            flash("这个代理这个学期已经有一张结算单，已为你打开")
+            return redirect(url_for("commission_edit", cid=dup["id"]))
     if request.method == "POST":
         if request.form.get("delete"):
-            vault.delete("commission", cid)
+            a = vault.get("agent", c.get("agent_id")) or {}
+            to_trash("commission", c, f"{a.get('name', '')} · {c.get('term', '')}")
+            flash(f"结算单已放进回收站，{TRASH_DAYS} 天内可以恢复")
             return redirect(url_for("commissions", term=c["term"]))
         if c.get("locked"):
             flash("结算单已发出，金额已锁定。如需修改，请先「退回草稿」。")
             return redirect(url_for("commission_edit", cid=cid))
+        term = (request.form.get("term") or "").strip()
+        if term not in terms():
+            flash(f"学期「{term}」不存在。请从下拉里选；新学期先在佣金结算页点「+ 新建学期」")
+            return redirect(request.full_path)
+        dup = find_statement(request.form.get("agent_id"), term, not_id=cid)
+        if dup:
+            flash("这个代理在这个学期已经有一张结算单了（同一学期只能有一张，避免重复付款）。已为你打开那张，请在那张里加学生")
+            return redirect(url_for("commission_edit", cid=dup["id"]))
         c = vault.put("commission", statement_form(c, request.form))
+        link_statement_students(c)
         flash("已保存，佣金已自动计算")
+        session["clear_draft"] = "commission"
         return redirect(url_for("commission_edit", cid=c["id"]))
     view = enrich(c, agents_by_id()) if c.get("agent_id") else dict(c, lines=[], calc=0, stage="草稿", scheme=None)
     inbound = []
     if c.get("agent_id"):
         inbound = [(m, f) for m in vault.all("mail") if m["direction"] == "in" and m.get("agent_id") == c["agent_id"]
                    for f in m.get("attachments", [])]
+    roster_pick = []
+    if c.get("agent_id") and not c.get("locked"):
+        inside = {x.get("student_id") for x in c.get("students") or []} | {_name_key(x.get("name")) for x in c.get("students") or []}
+        comms = vault.all("commission")
+        a = vault.get("agent", c["agent_id"]) or {}
+        for st in sorted([x for x in vault.all("student") if x.get("agent_id") == c["agent_id"]
+                          and x["id"] not in inside and _name_key(x.get("name")) not in inside],
+                         key=lambda x: (x.get("stage") != "已入学", (x.get("enrolled_status") or "在读") != "在读", x.get("name", ""))):
+            row = suggest_row(st, c["term"], a, comms)
+            roster_pick.append({"id": st["id"], "name": st.get("name", ""), "program": row["program"], "courses": st.get("courses") or "",
+                                "origin": st.get("origin") or "International", "tuition": row["tuition"], "intake": st.get("intake") or "",
+                                "enrolled_status": st.get("enrolled_status") or ("在读" if st.get("stage") == "已入学" else st.get("stage") or "")})
     return render_template("commission_form.html", c=view, agents=agents, terms=terms(), inbound=inbound,
-                           cfg=settings())
+                           cfg=settings(), roster_pick=roster_pick)
 
 
 @app.post("/commissions/<cid>/import-roster")
 @login_required
 def commission_import_roster(cid):
+    """第一步只读 Excel、给你看对比（新增几个、更新几个、原来有但文件里没有的几个），确认后才写进结算单。"""
     c = vault.get("commission", cid) or abort(404)
+    if c.get("locked"):
+        flash("结算单已发出，金额已锁定。如需修改，请先「退回草稿」。")
+        return redirect(url_for("commission_edit", cid=cid))
     f = request.files.get("file") or abort(400)
     sheets = statements.parse_roster(f.read())
     sheet = request.form.get("sheet") or c["term"]
-    pick = sheets.get(sheet) or (list(sheets.values())[-1] if sheets else [])
+    used = sheet if sheet in sheets else (list(sheets)[-1] if sheets else "")
+    pick = sheets.get(used) or []
     if not pick:
         flash("没有在 Excel 里找到 Student Name 开头的学生名单")
-    else:
+        return redirect(url_for("commission_edit", cid=cid))
+    have = {_name_key(x.get("name")): x for x in c.get("students") or []}
+    new_keys = {_name_key(x.get("name")) for x in pick}
+    rows = [dict(x, _st="更新" if _name_key(x.get("name")) in have else "新增") for x in pick]
+    gone = [x for k, x in have.items() if k not in new_keys]
+    a = vault.get("agent", c["agent_id"]) or {}
+    return render_template("roster_confirm.html", c=c, a=a, rows=rows, gone=gone, sheet=used, data=json.dumps(pick))
+
+
+@app.post("/commissions/<cid>/import-roster/apply")
+@login_required
+def commission_import_apply(cid):
+    c = vault.get("commission", cid) or abort(404)
+    if c.get("locked"):
+        abort(400)
+    try:
+        pick = json.loads(request.form.get("data") or "[]")
+    except ValueError:
+        abort(400)
+    if request.form.get("mode") == "replace":
         c["students"] = pick
-        c["imported"] = False
-        vault.put("commission", c)
-        flash(f"已导入 {len(pick)} 名学生（工作表：{sheet if sheet in sheets else list(sheets)[-1]}）")
+    else:  # 合并：同名的用文件里的数据，结算单里原有、文件里没有的保留
+        keys = {_name_key(x.get("name")): x for x in pick}
+        keep = [x for x in c.get("students") or [] if _name_key(x.get("name")) not in keys]
+        for x in pick:
+            old = next((y for y in c.get("students") or [] if _name_key(y.get("name")) == _name_key(x.get("name"))), {})
+            if old.get("student_id"):
+                x["student_id"] = old["student_id"]
+        c["students"] = keep + pick
+    c["imported"] = False
+    vault.put("commission", c)
+    link_statement_students(c)
+    flash(f"已导入 {len(pick)} 名学生（{'替换' if request.form.get('mode') == 'replace' else '合并'}），现在结算单里共 {len(c['students'])} 名")
     return redirect(url_for("commission_edit", cid=cid))
 
 
@@ -925,7 +1273,9 @@ def commission_send(cid):
         return redirect(url_for("commission_mail", cid=cid))
     with mailer.Outbox(vault) as box:
         send_statement(c, agents, box, sender=request.form.get("sender") or None)
-    flash("结算邮件和 Student Roster 已发给代理，等代理确认并回发票")
+    flash(f"{agents.get(c['agent_id'], {}).get('name', '')} 的结算邮件和 Student Roster 已发出，等代理确认并回发票")
+    if request.form.get("queue"):
+        return redirect(url_for("commission_queue", term=request.form["queue"], skip=request.form.get("skip") or None))
     return redirect(url_for("commission_edit", cid=cid))
 
 
@@ -965,7 +1315,7 @@ def commission_mail(cid):
                     vault.put("agent", a)
             vault.put("commission", c)
             flash("邮件草稿已保存")
-        return redirect(url_for("commission_mail", cid=cid))
+        return redirect(url_for("commission_mail", cid=cid, queue=request.args.get("queue"), skip=request.args.get("skip")))
     if c.get("locked") and c.get("sent_file"):
         e = enrich(c, agents)
         name, data = c["sent_file"]["name"], vault.get_file(c["sent_file"]["fid"])
@@ -974,7 +1324,14 @@ def commission_mail(cid):
     m = statement_mail(c, a, e)
     sheets = statements.preview(data)
     r = a.get("roster") or {}
-    return render_template("commission_mail.html", c=e, a=a, m=m, att_name=name, sheets=sheets,
+    queue = request.args.get("queue") or ""
+    qinfo = None
+    if queue and not c.get("locked"):
+        skip = [x for x in (request.args.get("skip") or "").split(",") if x]
+        q = draft_queue(queue, skip)
+        qinfo = {"term": queue, "left": len(q), "skip": ",".join(skip),
+                 "skip_next": ",".join(skip + [cid])}
+    return render_template("commission_mail.html", c=e, a=a, m=m, att_name=name, sheets=sheets, qinfo=qinfo,
                            new_sheet=statements.sheet_title(c["term"]), roster=r,
                            agent_label=r.get("agent_label") or statements.last_agent_label(
                                vault.get_file(r["fid"]) if r.get("fid") else None) or a.get("name", ""))
@@ -991,18 +1348,69 @@ def commission_roster(cid):
     return send_file(io.BytesIO(data), download_name=name, as_attachment=True)
 
 
-@app.post("/commissions/send-all")
-@login_required
-def commission_send_all():
-    term = request.form["term"]
+def draft_queue(term, skip=()):
+    """本学期还没发出的草稿结算单（逐张预览、逐张发出用），顺序和佣金结算页一样按代理编号。"""
     agents = agents_by_id()
-    drafts = [c for c in vault.all("commission") if c["term"] == term and stage_of(c) == "草稿"
-              and not c.get("imported") and agents.get(c["agent_id"], {}).get("email")]
-    with mailer.Outbox(vault) as box:
-        for c in drafts:
-            send_statement(c, agents, box)
-    flash(f"已给 {len(drafts)} 个代理发出结算单")
-    return redirect(url_for("commissions", term=term))
+    return sorted([c for c in vault.all("commission") if c["term"] == term and stage_of(c) == "草稿"
+                   and not c.get("imported") and c.get("students") and c["id"] not in skip],
+                  key=lambda c: agents.get(c["agent_id"], {}).get("code") or "J9")
+
+
+@app.route("/commissions/roster", methods=["GET", "POST"])
+@login_required
+def commission_roster_fill():
+    """按在读学生名册生成这个学期各代理的结算单草稿：续读学生自动带进来，第几年、付不付都先算好，你核对后再加。"""
+    term = request.values.get("term") or (terms() or [""])[-1]
+    if term not in terms():
+        flash("先选一个已有的学期")
+        return redirect(url_for("commissions"))
+    comms = vault.all("commission")
+    plan = []
+    for st, a in roster_candidates(term):
+        cur = find_statement(a["id"], term)
+        if cur and any(r.get("student_id") == st["id"] or _name_key(r.get("name")) == _name_key(st.get("name"))
+                       for r in cur.get("students") or []):
+            continue
+        row = suggest_row(st, term, a, comms)
+        plan.append({"st": st, "a": a, "row": row, "cur": cur, "locked": bool(cur and cur.get("locked")),
+                     "key": st["id"]})
+    plan.sort(key=lambda x: (x["a"].get("code") or "J9", x["st"].get("name", "")))
+    if request.method == "POST":
+        pick = set(request.form.getlist("pick"))
+        orders = {t: i for i, t in enumerate(terms())}
+        added, made = 0, 0
+        for x in plan:
+            if x["key"] not in pick or x["locked"]:
+                continue
+            c = find_statement(x["a"]["id"], term)
+            if not c:
+                c = {"agent_id": x["a"]["id"], "term": term, "term_order": orders.get(term, len(orders) + 100),
+                     "status": "草稿", "students": []}
+                made += 1
+            row = dict(x["row"])
+            t = request.form.get("tu_" + x["key"])
+            if t not in (None, ""):
+                row["tuition"] = fnum(t) or 0
+            row["nopay"] = request.form.get("pay_" + x["key"]) == "0"
+            c["students"] = (c.get("students") or []) + [row]
+            vault.put("commission", c)
+            added += 1
+        flash(f"已把 {added} 名在读学生加进 {term} 的结算单草稿（新建 {made} 张）。都还没发出，请逐张核对学费")
+        return redirect(url_for("commissions", term=term))
+    return render_template("roster_fill.html", term=term, plan=plan, terms=terms())
+
+
+@app.route("/commissions/send-queue")
+@login_required
+def commission_queue():
+    """「逐张预览并发出」：不再一键全部发出，而是一张一张打开预览页，看过再发，可以跳过。"""
+    term = request.args.get("term") or ""
+    skip = [x for x in (request.args.get("skip") or "").split(",") if x]
+    q = draft_queue(term, skip)
+    if not q:
+        flash(f"{term} 的草稿结算单都处理完了" + (f"（跳过了 {len(skip)} 张，还是草稿）" if skip else ""))
+        return redirect(url_for("commissions", term=term))
+    return redirect(url_for("commission_mail", cid=q[0]["id"], queue=term, skip=",".join(skip) or None))
 
 
 @app.post("/commissions/<cid>/confirm")
@@ -1300,7 +1708,7 @@ def prospects_review():
                 p["stage"] = "未联系"
                 vault.put("prospect", p)
             else:
-                vault.delete("prospect", p["id"])
+                to_trash("prospect", p, p.get("agency") or p.get("email") or "", "AI 搜索结果审核时没保留")
     flash("审核完成")
     return redirect(url_for("prospects"))
 
@@ -1352,8 +1760,6 @@ def outreach():
         english = {"subject": request.form["subject"], "body": request.form["body"]}
         custom = {k[3:]: {"label": i18n.LANG_LABELS.get(k[3:], k[3:]), "subject": "",
                           "body": v} for k, v in request.form.items() if k.startswith("tr_") and v.strip()}
-        sent = skipped = 0
-        follow = request.form.get("kind") == "followup"
         t = vault.get("template", request.form.get("tpl", ""))
         if t and request.form.get("save_tpl"):
             t.update(subject=english["subject"], body=english["body"])
@@ -1365,9 +1771,19 @@ def outreach():
                                [english["subject"], english["body"]] + [v["body"] for v in custom.values()]))
         if left:
             flash("还没发：邮件里还有没填的地方 " + "、".join("{" + x + "}" for x in left) +
-                  ("。资料包链接请到 设置 → 合作伙伴资料包链接 填好" if "kit_link" in left else "") + "，改好再发。")
-            return redirect(url_for("outreach", ids=list(ids), tpl=request.form.get("tpl", ""),
-                                    kind=request.form.get("kind", "")))
+                  ("。资料包链接请到 设置 → 合作伙伴资料包链接 填好" if "kit_link" in left else "") + "，改好再发（你改的内容都还在）。")
+            keep = {"english": english, "custom": custom}
+        else:
+            keep = None
+    else:
+        keep = None
+    if request.method == "POST" and request.form.get("go") and keep is None:
+        english = {"subject": request.form["subject"], "body": request.form["body"]}
+        custom = {k[3:]: {"label": i18n.LANG_LABELS.get(k[3:], k[3:]), "subject": "",
+                          "body": v} for k, v in request.form.items() if k.startswith("tr_") and v.strip()}
+        sent = skipped = 0
+        follow = request.form.get("kind") == "followup"
+        kit = kit_link()
         with mailer.Outbox(vault) as box:
             for p in picked:
                 if not p.get("email") or p.get("unsubscribed"):
@@ -1386,6 +1802,8 @@ def outreach():
         flash(f"已发出 {sent} 封{'跟进' if follow else '开发'}邮件" + (f"，{skipped} 个没有邮箱或已退订，已跳过" if skipped else ""))
         return redirect(url_for("prospects"))
     follow = request.values.get("kind") == "followup"
+    if keep:  # 被拦下：按刚才勾的收件人和改过的内容重新显示
+        picked = [p for p in (vault.get("prospect", i) for i in request.form.getlist("ids")) if p]
     # 收件人按地区选：所有能发的潜在代理都列出来；从列表页勾过的只勾那些，没勾过就默认全选
     pool = [p for p in vault.all("prospect") if p.get("email") and not p.get("unsubscribed")
             and p.get("stage") not in ("待审核", "已转为代理", "不合适")]
@@ -1398,14 +1816,16 @@ def outreach():
     langs = sorted({i18n.lang_for(p.get("country")) for p in pool} - {None})
     tpls = all_templates()
     mine = [t for t in tpls if t["kind"] == ("followup" if follow else "outreach")] or tpls
-    tpl = next((t for t in tpls if t["id"] == request.args.get("tpl")), None) or \
+    tpl = next((t for t in tpls if t["id"] == request.values.get("tpl")), None) or \
         next((t for t in mine if t.get("seed", "").startswith("promo-")), None) or \
         next((t for t in mine if "推荐" in t["name"]), mine[0])
     labels = i18n.LANG_LABELS
-    return render_template("outreach.html", picked=picked, groups=groups, english=tpl, langs=langs, kind="followup" if follow else "",
-                           tpl=tpl, tpls=tpls,
-                           translations={l: {"label": labels.get(l, l), "body": i18n.translation_for(tpl, l)}
-                                         for l in langs},
+    trs = {l: {"label": labels.get(l, l), "body": i18n.translation_for(tpl, l)} for l in langs}
+    if keep:
+        for l in langs:
+            trs[l]["body"] = keep["custom"].get(l, {}).get("body", "")
+    return render_template("outreach.html", picked=picked, groups=groups, english=keep["english"] if keep else tpl, langs=langs,
+                           kind="followup" if follow else "", tpl=tpl, tpls=tpls, translations=trs,
                            has_ai=ai.available(settings()), ai_mode=ai.mode(settings()), has_kit=bool(kit_link()))
 
 
@@ -1442,8 +1862,8 @@ def mail_templates(tid=None):
     t = next((x for x in tpls if x["id"] == tid), None) if tid else None
     if request.method == "POST":
         if request.form.get("delete") and t:
-            vault.delete("template", t["id"])
-            flash("模板已删除")
+            to_trash("template", t, t.get("name", ""))
+            flash(f"模板已放进回收站，{TRASH_DAYS} 天内可以恢复")
             return redirect(url_for("mail_templates"))
         t = t or {"translations": {}}
         for k in ("name", "kind", "subject", "body"):
@@ -1523,46 +1943,115 @@ def prospects_translate():
 @login_required
 def mail():
     box = request.args.get("box", "in")
+    f = {k: request.args.get(k, "") for k in ("q", "who", "unread")}
     agents = agents_by_id()
+    prospects_ = {p["id"]: p for p in vault.all("prospect")}
     msgs = sorted([m for m in vault.all("mail") if m["direction"] == box], key=lambda m: m["at"], reverse=True)
-    return render_template("mail.html", box=box, msgs=msgs, agents=agents,
-                           campaigns=sorted(vault.all("campaign"), key=lambda c: c.get("next_at") or "9"),
+    if f["who"] == "agent":
+        msgs = [m for m in msgs if m.get("agent_id")]
+    elif f["who"] == "prospect":
+        msgs = [m for m in msgs if m.get("prospect_id") and not m.get("agent_id")]
+    elif f["who"] == "other":
+        msgs = [m for m in msgs if not m.get("agent_id") and not m.get("prospect_id")]
+    elif f["who"]:
+        msgs = [m for m in msgs if m.get("agent_id") == f["who"]]
+    if f["unread"]:
+        msgs = [m for m in msgs if m.get("status") == "未读"]
+    if f["q"]:
+        q = f["q"].lower()
+        msgs = [m for m in msgs if q in " ".join([m.get("subject") or "", m.get("from") or "", m.get("to") or "",
+                                                  (agents.get(m.get("agent_id")) or {}).get("name", ""),
+                                                  (prospects_.get(m.get("prospect_id")) or {}).get("agency", ""),
+                                                  (m.get("body") or "")[:2000]]).lower()]
+    per, page = 50, max(1, int(request.args.get("page") or 1))
+    pages = max(1, (len(msgs) + per - 1) // per)
+    page = min(page, pages)
+    camps = sorted(vault.all("campaign"), key=lambda c: c.get("next_at") or "9")
+    return render_template("mail.html", box=box, msgs=msgs[(page - 1) * per:page * per], n=len(msgs), page=page, pages=pages,
+                           f=f, agents=agents, prospects=prospects_, campaigns=camps,
+                           unread_n=sum(1 for m in vault.all("mail") if m["direction"] == "in" and m.get("status") == "未读"),
+                           agent_opts=sorted([a for a in agents.values() if a.get("status") in ("活跃", "已签约", "洽谈中")],
+                                             key=lambda a: a.get("name", "").lower()),
                            live=mailer.mail_on(settings()))
+
+
+def _blank_hint(left):
+    return ("还没发：邮件里还有没替换的地方 " + "、".join(left) +
+            ("。资料包链接请到 设置 → 合作伙伴资料包链接 填好" if "{kit_link}" in left or "{资料包链接}" in left else "") +
+            "。改好再发（你写的内容都还在）。")
+
+
+def _compose_page(c=None):
+    """写邮件页。c = 已经写好的内容（预览后返回修改、被拦下时都不丢）。"""
+    agents = sorted([a for a in vault.all("agent") if a.get("email")], key=lambda a: a.get("code") or "J9")
+    pre = request.args.get("agent")
+    chosen = set(c["agent_ids"]) if c else None
+    groups = i18n.recipient_groups([{"id": a["id"], "label": f"{a.get('code') or ''} {a['name']}".strip(),
+                                     "sub": a["email"] + ("" if a.get("status") == "活跃" else f" · {a.get('status') or '未激活'}"),
+                                     "country": a.get("country"),
+                                     "checked": (a["id"] in chosen) if chosen is not None else
+                                     (a["id"] == pre if pre else a.get("status") == "活跃")}
+                                    for a in agents if not a.get("unsubscribed")])
+    return render_template("compose.html", agents=agents, pre=pre, groups=groups, tpls=all_templates(), c=c or {},
+                           placeholders=mailer.PLACEHOLDERS,
+                           kit=[x for x in all_assets() if x.get("url") and x.get("share")])
 
 
 @app.route("/mail/compose", methods=["GET", "POST"])
 @login_required
 def compose():
-    agents = sorted([a for a in vault.all("agent") if a.get("email")], key=lambda a: a.get("code") or "J9")
-    if request.method == "POST":
-        f = request.form
-        c = {"subject": f["subject"], "body": f["body"], "audience": f["audience"],
-             "agent_ids": f.getlist("agent_ids"), "cadence": f["cadence"], "sender": f.get("sender") or None}
-        when = f.get("send_at")
-        left = [x for x in i18n.unfilled(i18n.fill_links(c["subject"] + "\n" + c["body"], kit_link()))
-                if x in ("link", "kit_link", "intake", "deadline")]
-        if left:
-            flash("还没发：邮件里还有没填的地方 " + "、".join("{" + x + "}" for x in left) +
-                  ("。资料包链接请到 设置 → 合作伙伴资料包链接 填好" if "kit_link" in left else "") + "，改好再发。")
-            return redirect(url_for("compose"))
-        if f["cadence"] == "立即发送" and not when:
-            sent = mailer.send_to_agents(vault, mailer.recipients(vault, c), c["subject"], c["body"],
-                                         sender=c["sender"], kit_link=kit_link())
-            flash(f"已处理 {len(sent)} 封邮件")
-            return redirect(url_for("mail", box="out"))
-        c.update(active=True, next_at=when or dt.datetime.now().isoformat(timespec="minutes"),
-                 created=dt.date.today().isoformat())
-        vault.put("campaign", c)
-        flash("定时推送已创建")
-        return redirect(url_for("mail"))
-    pre = request.args.get("agent")
-    groups = i18n.recipient_groups([{"id": a["id"], "label": f"{a.get('code') or ''} {a['name']}".strip(),
-                                     "sub": a["email"] + ("" if a.get("status") == "活跃" else f" · {a.get('status') or '未激活'}"),
-                                     "country": a.get("country"),
-                                     "checked": a["id"] == pre if pre else a.get("status") == "活跃"}
-                                    for a in agents if not a.get("unsubscribed")])
-    return render_template("compose.html", agents=agents, pre=pre, groups=groups, tpls=all_templates(),
-                           kit=[x for x in all_assets() if x.get("url") and x.get("share")])
+    """写邮件：写内容 → 选收件人 → 预览（可先发一封给自己）→ 确认发送。不会一点就群发。"""
+    if request.method == "GET":
+        return _compose_page()
+    f = request.form
+    c = {"subject": f.get("subject", ""), "body": f.get("body", ""), "audience": "选定代理",
+         "agent_ids": f.getlist("agent_ids"), "cadence": f.get("cadence") or "立即发送", "sender": f.get("sender") or None,
+         "send_at": f.get("send_at") or ""}
+    action = f.get("action") or "preview"
+    if action == "edit":
+        return _compose_page(c)
+    recips = [a for a in mailer.recipients(vault, c) if not a.get("unsubscribed")]
+    kit = kit_link()
+    left = mailer.leftover(*(mailer.render(x, recips[0] if recips else {"name": "X"}, kit) for x in (c["subject"], c["body"])))
+    if left:
+        flash(_blank_hint(left))
+        return _compose_page(c)
+    if not recips:
+        flash("还没选收件人：在下面按地区勾选代理")
+        return _compose_page(c)
+    if c["cadence"] != "立即发送" and not c["send_at"] and c["cadence"] == "仅一次（定时）":
+        flash("定时发送请填「首次发送时间」")
+        return _compose_page(c)
+    sender = c["sender"] or (mailer.account_for(settings(), "news") or {}).get("user") or ""
+    if action == "test":
+        to = (f.get("test_to") or "").strip()
+        if "@" not in to:
+            flash("请填测试邮件发到哪个邮箱")
+        else:
+            with mailer.Outbox(vault) as box:
+                a0 = recips[0]
+                box.send(to, "[测试] " + mailer.render(c["subject"], a0, kit), mailer.render(c["body"], a0, kit),
+                         kind="news", sender=c["sender"])
+            flash(f"测试邮件已发到 {to}（按 {recips[0]['name']} 的称呼替换），请查收后再确认群发")
+        action = "preview"
+    if action == "preview":
+        samples = [{"a": a, "subject": mailer.render(c["subject"], a, kit), "body": mailer.render(c["body"], a, kit)}
+                   for a in recips]
+        return render_template("compose_preview.html", c=c, samples=samples, sender=sender,
+                               test_to=f.get("test_to") or settings().get("digest_to") or sender)
+    if action != "send":
+        abort(400)
+    if c["cadence"] == "立即发送" and not c["send_at"]:
+        sent = mailer.send_to_agents(vault, recips, c["subject"], c["body"], sender=c["sender"], kit_link=kit)
+        flash(f"已发出 {len(sent)} 封邮件")
+        session["clear_draft"] = "compose"
+        return redirect(url_for("mail", box="out"))
+    c.update(active=True, next_at=c.pop("send_at") or dt.datetime.now().isoformat(timespec="minutes"),
+             created=dt.date.today().isoformat())
+    vault.put("campaign", c)
+    flash(f"定时推送已创建，首次 {c['next_at'].replace('T', ' ')}，发给 {len(recips)} 个代理")
+    session["clear_draft"] = "compose"
+    return redirect(url_for("mail"))
 
 
 @app.post("/mail/campaign/<cid>")
@@ -1570,7 +2059,15 @@ def compose():
 def campaign_toggle(cid):
     c = vault.get("campaign", cid) or abort(404)
     if request.form.get("delete"):
-        vault.delete("campaign", cid)
+        to_trash("campaign", c, c.get("subject", ""))
+        flash(f"定时推送已放进回收站，{TRASH_DAYS} 天内可以恢复")
+    elif request.form.get("catchup"):
+        sent = mailer.send_campaign(vault, c)
+        flash(f"已补发「{c['subject']}」{len(sent)} 封" + (f"，下次 {c['next_at'].replace('T', ' ')}" if c.get("next_at") else ""))
+    elif request.form.get("skip"):
+        mailer.advance(c, dt.datetime.now())
+        vault.put("campaign", c)
+        flash("这次已跳过" + (f"，下次 {c['next_at'].replace('T', ' ')}" if c.get("next_at") else "，这条一次性推送已结束"))
     else:
         c["active"] = not c.get("active")
         vault.put("campaign", c)
@@ -1602,7 +2099,7 @@ def mail_msg(mid):
 
 
 def student_from_form(st, f):
-    for k in ("name", "agent_id", "program", "grade", "intake", "country", "courses", "notes", "origin"):
+    for k in ("name", "agent_id", "program", "grade", "intake", "country", "courses", "notes", "origin", "enrolled_status"):
         if k in f:
             st[k] = f.get(k, "").strip()
     st["tuition"] = fnum(f.get("tuition"))
@@ -1673,13 +2170,22 @@ def student_assign(sid):
 def students():
     sync_admissions()
     f = {k: request.args.get(k, "") for k in ("stage", "agent", "intake", "q")}
+    cay = current_ay()
+    f["ay"] = request.args.get("ay", cay)  # 默认只看本学年：本学年入学的 + 还在读的；选「全部学年」看历届
     agents = agents_by_id()
     rows = vault.all("student")
+    ays = sorted({academic_year(s.get("intake") or "") for s in rows if s.get("intake")} | {cay}, reverse=True)
     unassigned = [s for s in rows if (s.get("web_no") or s.get("agent_hint")) and s.get("uses_agent") and not s.get("agent_id")]
+    if f["ay"] and not f["q"] and f["stage"] != "待分配":  # 搜名字、看待分配时不限学年
+        rows = [s for s in rows if academic_year(s.get("intake") or "") == f["ay"]
+                or (f["ay"] == cay and s.get("stage") == "已入学" and (s.get("enrolled_status") or "在读") == "在读")
+                or (f["ay"] == cay and not s.get("intake") and s.get("stage") not in ("已入学", "未入学"))]
     intakes = sorted({s.get("intake") for s in rows if s.get("intake")})
     counts = {g: sum(1 for s in rows if s.get("stage") == g) for g in STUDENT_STAGES}
     if f["stage"] == "待分配":
         rows = unassigned
+    elif f["stage"] in ENROLL_STATUSES:
+        rows = [s for s in rows if s.get("stage") == "已入学" and (s.get("enrolled_status") or "在读") == f["stage"]]
     elif f["stage"]:
         rows = [s for s in rows if s.get("stage") == f["stage"]]
     if f["agent"]:
@@ -1691,7 +2197,7 @@ def students():
         rows = [s for s in rows if q in (s.get("name", "") + " " + agents.get(s.get("agent_id"), {}).get("name", "")).lower()]
     rows.sort(key=lambda s: (STUDENT_STAGES.index(s["stage"]) if s.get("stage") in STUDENT_STAGES else 9,
                              max((s.get("history") or {"": ""}).values())), reverse=False)
-    return render_template("students.html", rows=rows, agents=agents, counts=counts, f=f, intakes=intakes,
+    return render_template("students.html", rows=rows, agents=agents, counts=counts, f=f, intakes=intakes, ays=ays, cay=cay,
                            unassigned=len(unassigned), adm_on=admissions.enabled(), adm=_adm_last,
                            agent_list=sorted(agents.values(), key=lambda a: a.get("name", "")))
 
@@ -1706,8 +2212,8 @@ def student_edit(sid=None):
         abort(404)
     if request.method == "POST":
         if request.form.get("delete"):
-            vault.delete("student", sid)
-            flash("已删除")
+            to_trash("student", st, st.get("name", ""))
+            flash(f"学生已放进回收站，{TRASH_DAYS} 天内可以恢复")
             return redirect(url_for("students"))
         if not st.get("stage") and not request.form.get("stage"):
             st["stage"] = "收到申请"
@@ -1721,9 +2227,12 @@ def student_edit(sid=None):
             st.setdefault("docs", []).append(doc)
         st = vault.put("student", st)
         flash("已保存")
+        session["clear_draft"] = "student"
         return redirect(url_for("student_edit", sid=st["id"]))
     agents = sorted(vault.all("agent"), key=lambda a: a.get("name", ""))
-    return render_template("student_form.html", st=st, agents=agents, terms=terms(), agent=agents_by_id().get(st.get("agent_id")))
+    paid_rows = sorted(student_rows(st, vault.all("commission")), key=lambda x: term_pos(x[0]["term"])) if st.get("id") else []
+    return render_template("student_form.html", st=st, agents=agents, terms=terms(), agent=agents_by_id().get(st.get("agent_id")),
+                           paid_rows=paid_rows, agents_map=agents_by_id())
 
 
 @app.post("/students/<sid>/stage")
@@ -2015,11 +2524,16 @@ def performance():
     studs = vault.all("student")
     today = dt.date.today()
     rows = []
+    season = lambda t: re.sub(r"^\s*20\d\d\s*|\s*\d\d-\d\d\s*$", "", t or "").strip().lower()
+    have = {season(c["term"]) for c in comms if academic_year(c["term"]) == ay}
+    partial = ay == current_ay() and bool(have)
+    # 本学年还没过完：上一学年只拿同样几个学期来比（同期对比），不拿全年比
+    prev_comms = [c for c in comms if not partial or season(c["term"]) in have]
     for a in agents.values():
         if a.get("status") in ("潜在", "洽谈中"):
             continue
         s = agent_ay_stats(a["id"], ay, comms, agents)
-        p = agent_ay_stats(a["id"], prev, comms, agents) if prev else {"commission": 0}
+        p = agent_ay_stats(a["id"], prev, prev_comms, agents) if prev else {"commission": 0}
         apps = [x for x in studs if x.get("agent_id") == a["id"] and academic_year(x.get("intake") or "") == ay]
         enrolled = sum(1 for x in apps if x.get("stage") == "已入学")
         last = max((c.get("paid_on") or c.get("sent_on") or "" for c in comms if c["agent_id"] == a["id"]), default="")
@@ -2029,7 +2543,8 @@ def performance():
                      "idle": not last or (today - dt.date.fromisoformat(last[:10])).days > 365})
     rows.sort(key=lambda r: (-r["commission"], -r["students"]))
     active = [r for r in rows if r["students"] or r["commission"]]
-    return render_template("performance.html", rows=rows, ay=ay, ays=ays, prev=prev, active=active,
+    same_terms = sorted({c["term"] for c in comms if academic_year(c["term"]) == ay}, key=lambda t: term_pos(t))
+    return render_template("performance.html", rows=rows, ay=ay, ays=ays, prev=prev, active=active, partial=partial, same_terms=same_terms,
                            idle=[r for r in rows if r["idle"] and r["a"].get("status") == "活跃"],
                            total=sum(r["commission"] for r in rows), fees=sum(r["fees"] for r in rows))
 
@@ -2083,8 +2598,8 @@ def materials(mid=None):
         abort(404)
     if request.method == "POST":
         if request.form.get("delete") and m:
-            vault.delete("asset", mid)
-            flash("已删除")
+            to_trash("asset", m, m.get("title", ""))
+            flash(f"已放进回收站，{TRASH_DAYS} 天内可以恢复")
             return redirect(url_for("materials"))
         m = m or {}
         for k in ("title", "kind", "lang", "url", "note"):
@@ -2525,8 +3040,10 @@ def settings_page():
                 _trusted_save({})  # 换密码时，所有记住的设备都要重新输验证码
                 flash("主密码已更换；所有记住的设备下次登录要重新输验证码")
         else:
-            if f.get("m365_form"):
+            if f.get("notify_form"):
                 cfg["digest_on"] = "1" if f.get("digest_on") else "0"
+                cfg["lock_notify"] = "1" if f.get("lock_notify") else "0"
+            if f.get("m365_form"):
                 if (f.get("m365_client_id", "").strip() != cfg.get("m365_client_id", "")
                         or f.get("m365_tenant", "").strip() != cfg.get("m365_tenant", "")):
                     cfg.pop("m365_accounts", None)  # 换了应用或租户，所有邮箱都要重新授权
@@ -2536,17 +3053,19 @@ def settings_page():
                 cfg["mail_route"] = {k: f.get("route_" + k) for k, _ in mailer.MAIL_KINDS if f.get("route_" + k) in users}
             for k in ("app_senders", "m365_tenant", "m365_client_id", "digest_to",
                       "smtp_host", "smtp_port", "smtp_user", "from_addr", "imap_host", "imap_user", "accountant_email",
-                      "ai_mode", "local_llm_url", "local_model", "searxng_url", "openai_model"):
+                      "ai_mode", "local_llm_url", "local_model", "searxng_url", "openai_model",
+                      "kit_link", "payer_name", "payer_bn"):  # 资料包链接、T4A 表头以前没存进去（2026-11-06 修好）
                 if k in f:
                     cfg[k] = f.get(k, "").strip()
             for k in ("smtp_password", "imap_password", "anthropic_key", "local_api_key", "openai_key"):
                 if f.get(k):
                     cfg[k] = f[k].strip()
             vault.put("settings", cfg)
+            save_lock_notify()
             flash("设置已加密保存")
         return redirect(url_for("settings_page"))
     log = [(dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M"), e) for t, e in vault.audit_log()]
-    return render_template("settings.html", cfg=cfg, app_on=mailer.app_on(), log=log, trusted_n=len(_trusted_load()), this_trusted=device_trusted(), portal_on=portal.enabled(), bk=backup.status(DATA_DIR), bk_dir=backup.backup_dir(),
+    return render_template("settings.html", cfg=cfg, version=version.VERSION, changes=version.CHANGES, app_on=mailer.app_on(), log=log, trusted_n=len(_trusted_load()), this_trusted=device_trusted(), portal_on=portal.enabled(), bk=backup.status(DATA_DIR), bk_dir=backup.backup_dir(),
                            bk_files=backup.listing()[:5])
 
 
@@ -2618,9 +3137,33 @@ def settings_backup_verify():
         msg = f"恢复演练：{r['file']} 里 {r['records']} 条记录、{r['files']} 个文件都能用现在的密钥解开"
         flash(msg + ("。" if not r["bad"] else f"，但有 {r['bad']} 项解不开，请告诉 Claude"))
         vault.audit(f"backup verify: {r['records']} records, {r['files']} files, {r['bad']} bad")
+        _save_verify(not r["bad"], f"{r['records']} 条记录、{r['files']} 个文件" + (f"，{r['bad']} 项解不开" if r["bad"] else ""))
     except Exception as e:  # noqa: BLE001
         flash(f"恢复演练失败：{e}")
+        _save_verify(False, str(e)[:200])
     return redirect(url_for("settings_page"))
+
+
+def _save_verify(ok, msg):
+    rec = vault.get("settings", "mail") or {"id": "mail"}
+    rec["last_verify"] = {"at": dt.datetime.now().isoformat(timespec="minutes").replace("T", " "), "ok": ok, "msg": msg}
+    vault.put("settings", rec)
+
+
+def backup_health():
+    """备份是否正常：设了备份目录但超过 2 天没成功、或上次出错、或恢复演练失败，返回一句提示；正常返回空。"""
+    if not backup.backup_dir():
+        return ""
+    st = backup.status(DATA_DIR)
+    last = (st.get("last_ok") or "")[:10]
+    if st.get("last_error"):
+        return f"NAS 备份上次出错：{st['last_error']}"
+    if not last or (dt.date.today() - dt.date.fromisoformat(last)).days > 2:
+        return f"NAS 备份已经 {'很久' if not last else (dt.date.today() - dt.date.fromisoformat(last)).days} 天没有成功了"
+    v = settings().get("last_verify") or {}
+    if v and not v.get("ok"):
+        return f"上次恢复演练失败：{v.get('msg', '')}"
+    return ""
 
 
 @app.post("/settings/backup")
@@ -2667,7 +3210,16 @@ def weekly_digest(force=False):
     lines += ["", f"三、需要跟进的潜在代理：{len(fu)} 个"]
     week_ago = (dt.datetime.now() - dt.timedelta(days=7)).isoformat()
     inbox_n = sum(1 for m in vault.all("mail") if m["direction"] == "in" and m.get("at", "") >= week_ago)
-    lines += [f"四、过去 7 天收到的代理邮件：{inbox_n} 封", "", "详情请在学校网络里打开 https://192.168.1.75:8443 查看。"]
+    lines += [f"四、过去 7 天收到的代理邮件：{inbox_n} 封"]
+    bst = backup.status(DATA_DIR)
+    v = cfg.get("last_verify") or {}
+    lines += ["", "五、备份", f"   • 最近一次备份成功：{(bst.get('last_ok') or '还没有').replace('T', ' ')}"
+              + (f"；出错：{bst['last_error']}" if bst.get("last_error") else ""),
+              f"   • 上次恢复演练：{v.get('at', '还没做过')}" + ("" if not v else ("（通过）" if v.get("ok") else f"（失败：{v.get('msg')}）"))]
+    due = due_followups()
+    if due:
+        lines += ["", f"六、到期的跟进记录：{len(due)} 条"] + [f"   • {e['next']} {r.get('name') or r.get('agency')}：{e['text'][:60]}" for _, r, _, e in due[:10]]
+    lines += ["", "详情请在学校网络里打开 https://192.168.1.75:8443 查看。"]
     with mailer.Outbox(vault) as box:
         box.send(to, f"代理管理 · 每周汇总 {today.isoformat()}", "\n".join(lines), kind="digest")
     rec = vault.get("settings", "mail") or {"id": "mail"}
@@ -2677,9 +3229,71 @@ def weekly_digest(force=False):
     return True
 
 
+# ---------- 系统锁定提醒：服务器重启后系统是锁着的，定时邮件、每周提醒、官网同步都停了，发邮件提醒 POLO 登录 ----------
+LOCK_NOTIFY_HOURS = 2
+_lock = {"since": time.time()}  # 启动时就是锁定的
+
+
+def _notify_path():
+    return os.path.join(DATA_DIR, "lock-notify.json")
+
+
+def save_lock_notify():
+    """登录（解锁）时记下：锁定后提醒发给谁、用哪个应用发件地址。只存两个邮箱地址，不含任何代理数据，所以不加密。"""
+    cfg = settings()
+    to = cfg.get("digest_to") or cfg.get("m365_user") or ""
+    acct = mailer.account_for(cfg, "digest") or {}
+    sender = acct["user"] if acct.get("app") else next((x["user"] for x in mailer.accounts(cfg) if x.get("app")), "")
+    old = _read_lock_notify()
+    rec = {"to": to, "sender": sender, "last": old.get("last", 0), "off": cfg.get("lock_notify") == "0"}
+    try:
+        with open(_notify_path(), "w") as fh:
+            json.dump(rec, fh)
+    except OSError:
+        pass
+
+
+def _read_lock_notify():
+    try:
+        with open(_notify_path()) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def check_lock_notify(now=None):
+    """系统锁定超过 2 小时就发一封提醒（一天最多一封）。返回是否发了。"""
+    now = now or time.time()
+    if vault.unlocked or not vault.initialized or _lock["since"] is None or now - _lock["since"] < LOCK_NOTIFY_HOURS * 3600:
+        return False
+    rec = _read_lock_notify()
+    if rec.get("off") or not rec.get("to") or now - rec.get("last", 0) < 20 * 3600:
+        return False
+    hours = int((now - _lock["since"]) // 3600)
+    ok = mailer.app_send_plain(rec.get("sender"), rec["to"], "代理管理系统已锁定，请登录解锁",
+                               f"代理管理系统已经锁定约 {hours} 小时（通常是服务器重启了）。\n\n"
+                               "锁定期间定时邮件、每周一提醒和官网申请同步都暂停。请在学校网络里打开 "
+                               "https://192.168.1.75:8443 用主密码登录一次，就会恢复。\n\n"
+                               "（这封提醒不含任何代理数据，由系统自动发出。）")
+    if ok:
+        rec["last"] = now
+        with open(_notify_path(), "w") as fh:
+            json.dump(rec, fh)
+    return ok
+
+
 def start_jobs():
     mailer.start_scheduler(vault)
     backup.start(DATA_DIR)
+
+    def lock_watch():
+        while True:
+            try:
+                check_lock_notify()
+            except Exception as e:  # noqa: BLE001  网络问题不影响系统
+                app.logger.warning("lock notify failed: %s", e)
+            time.sleep(600)
+    threading.Thread(target=lock_watch, daemon=True).start()
 
     def daily():
         while True:

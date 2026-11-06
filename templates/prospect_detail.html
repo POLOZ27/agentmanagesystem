@@ -14,4 +14,5 @@
 {% if p.k12_fit %}<tr><td class="mute">高中适合度</td><td class="small">{{ p.k12_fit }}</td></tr>{% endif %}
 {% if p.canada_focus %}<tr><td class="mute">加拿大业务</td><td class="small">{{ p.canada_focus }}</td></tr>{% endif %}
 <tr><td class="mute">已发邮件</td><td>{{ p.emails_sent or 0 }} 封{% if p.last_email_on %} · 上次 {{ p.last_email_on }}{% endif %}</td></tr></table></div></div>
+{% with rec = p, nkind = 'prospect' %}{% include "_notes.html" %}{% endwith %}
 <div class="card"><h2>往来邮件</h2><table>{% for m in mails %}<tr><td>{{ '↙ 收' if m.direction=='in' else '↗ 发' }}</td><td><a href="{{ url_for('mail_msg', mid=m.id) }}">{{ m.subject }}</a></td><td class="small mute">{{ m.at[:16]|replace('T',' ') }}</td></tr>{% else %}<tr><td class="mute">暂无</td></tr>{% endfor %}</table></div>{% endblock %}

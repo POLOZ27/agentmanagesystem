@@ -36,34 +36,36 @@
 </div>{% endif %}
 
 {% set sc = agent_scheme(c.agent) if c.agent else None %}
-<form method="post" class="card" id="f"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<form method="post" class="card" id="f" data-draft="commission"><input type="hidden" name="_csrf" value="{{ csrf }}">
 <h2>学生明细{% if c.locked %} <span class="tag">已锁定</span>{% endif %}</h2>
 <fieldset style="border:0;padding:0;margin:0" {{ 'disabled' if c.locked }}>
 <div class="grid">
-<div><label>代理</label><select name="agent_id" id="agent" required><option value="">选择代理</option>{% for a in agents %}{% set s = agent_scheme(a) %}<option value="{{ a.id }}" data-y1="{{ s.y1 }}" data-y16="{{ s.y1_6 }}" data-y2="{{ s.y2 }}" data-y3="{{ s.y3 }}" {{ 'selected' if a.id==c.agent_id }}>{{ a.code or '' }} {{ a.name }}</option>{% endfor %}</select></div>
-<div><label>学期</label><input name="term" list="terms" value="{{ c.term }}" required><datalist id="terms">{% for t in terms %}<option>{{ t }}</option>{% endfor %}</datalist></div>
-<div><label>佣金规则</label><div class="small" id="rule" style="padding-top:6px">{{ scheme_label(c.agent) if c.agent else '' }}{% if c.agent and c.agent.level %}<br><span class="mute">本学年第一年学生已有 {{ c.ft1_ay }} 人{{ '，已按高档' if c.ft1_ay >= 6 else '，满 6 人自动升档并补差' }}</span>{% endif %}</div></div></div>
-<div class="tablewrap"><table style="margin-top:12px" id="stu"><tr><th>学生姓名</th><th>类别</th><th>课程</th><th>本地/国际</th><th>已缴学费</th><th>比例覆盖</th><th>本学期佣金</th><th>备注</th><th class="r">佣金（预估）</th><th></th></tr>
-{% for s in (c.students or []) + [{}] %}<tr class="srow">
-<td><input name="s_name" value="{{ s.name or '' }}" style="min-width:130px"></td>
-<td><select name="s_program">{% for k, v in PROGRAMS.items() %}<option value="{{ k }}" {{ 'selected' if s.program==k }}>{{ v }}</option>{% endfor %}</select></td>
+<div><label>代理</label><select name="agent_id" id="agent" required><option value="">选择代理</option>{% for a in agents %}{% set s = agent_scheme(a) %}<option value="{{ a.id }}" data-y1="{{ s.y1 }}" data-y16="{{ s.y1_6 }}" data-y2="{{ s.y2 }}" data-y3="{{ s.y3 }}" data-ap="{{ a.ap_rate if a.ap_rate not in (none, '') else 10 }}" {{ 'selected' if a.id==c.agent_id }}>{{ a.code or '' }} {{ a.name }}</option>{% endfor %}</select></div>
+<div><label>学期</label><select name="term" required>{% if c.term not in terms %}<option value="" selected>请选择</option>{% endif %}{% for t in terms|reverse %}<option {{ 'selected' if t == c.term }}>{{ t }}</option>{% endfor %}</select>
+<div class="small mute">没有要的学期？到 <a href="{{ url_for('commissions') }}">佣金结算</a> 点「+ 新建学期」</div></div>
+<div><label>佣金规则</label><div class="small" id="rule" style="padding-top:6px">{{ scheme_label(c.agent) if c.agent else '' }}{% if c.agent and c.agent.pay_terms %}<br><span class="mute">合同只付前 {{ c.agent.pay_terms }} 个学期</span>{% endif %}{% if c.agent and c.agent.level %}<br><span class="mute">本学年第一年学生已有 {{ c.ft1_ay }} 人{{ '，已按高档' if c.ft1_ay >= 6 else '，满 6 人自动升档并补差' }}</span>{% endif %}</div></div></div>
+{% if roster_pick %}<div class="inline" style="margin-top:10px"><div style="flex:3"><label>从学生名册加入（这个代理名下的学生，已在单子里的不列）</label><select id="pickstu"><option value="">选一个学生…</option>{% for x in roster_pick %}<option value="{{ loop.index0 }}">{{ x.name }} · {{ PROGRAMS.get(x.program, x.program) }}{{ ' · ' ~ x.intake if x.intake }}{{ ' · ' ~ x.enrolled_status if x.enrolled_status and x.enrolled_status != '在读' }}</option>{% endfor %}</select></div></div>{% endif %}
+<div class="tablewrap"><table style="margin-top:12px" id="stu"><tr><th>学生姓名</th><th>类别</th><th>课程</th><th>本地 / 国际</th><th>已缴学费</th><th title="这个学生不按合同比例时才填，例如 30">特殊比例 %</th><th title="例如合同只付前两个学期、已经付清，就选「不付」">本学期</th><th>备注</th><th class="r">佣金（预估）</th><th></th></tr>
+{% for s in (c.students or []) or [{}] %}<tr class="srow">
+<td><input type="hidden" name="s_sid" value="{{ s.student_id or '' }}"><input name="s_name" value="{{ s.name or '' }}" style="min-width:140px">{% if s.name and not s.student_id %}<div class="small mute nolink" title="保存时会按名字自动对上；对不上的说明学生名册里没有这个人">未关联学生名册</div>{% endif %}</td>
+<td><select name="s_program" style="min-width:132px">{% for k, v in PROGRAMS.items() %}<option value="{{ k }}" {{ 'selected' if s.program==k }}>{{ v }}</option>{% endfor %}</select></td>
 <td><input name="s_courses" value="{{ s.courses or '' }}" style="min-width:110px"></td>
-<td><select name="s_origin">{% for o in ['International','Local'] %}<option {{ 'selected' if s.origin==o }}>{{ o }}</option>{% endfor %}</select></td>
+<td><select name="s_origin" style="min-width:96px"><option value="International" {{ 'selected' if s.origin != 'Local' }}>国际生</option><option value="Local" {{ 'selected' if s.origin == 'Local' }}>本地生</option></select></td>
 <td><input name="s_tuition" class="tu" value="{{ s.tuition if s.tuition is not none else '' }}" style="width:100px"></td>
-<td><input name="s_rate" class="ov" value="{{ s.rate if s.rate is not none else '' }}" placeholder="%" style="width:60px"></td>
-<td><select name="s_pay" class="pay" title="例如合同只付前两个学期、已经付清，就选「不付」"><option value="1">付</option><option value="0" {{ 'selected' if s.nopay }}>不付</option></select></td>
-<td><input name="s_note" value="{{ s.note or '' }}"></td><td class="r amt"></td><td><button type="button" class="btn ghost del" title="删除">×</button></td></tr>{% endfor %}
+<td><input name="s_rate" class="ov" value="{{ s.rate if s.rate is not none else '' }}" placeholder="按合同" style="width:76px"></td>
+<td><select name="s_pay" class="pay" style="min-width:72px"><option value="1">付</option><option value="0" {{ 'selected' if s.nopay }}>不付</option></select></td>
+<td><input name="s_note" value="{{ s.note or '' }}" style="min-width:110px"></td><td class="r amt" style="white-space:nowrap"></td><td><button type="button" class="btn ghost del" title="删除这一行">×</button></td></tr>{% endfor %}
 </table></div>
-<p><button type="button" class="btn ghost" id="add">+ 加一名学生</button></p>
+<p><button type="button" class="btn ghost" id="add" data-addrow>+ 加一名学生</button></p>
 <div class="grid"><div><label>其它调整金额（如 -500 退费）</label><input name="other_amount" id="other" value="{{ c.other_amount if c.other_amount is not none else '' }}"></div>
 <div><label>调整说明</label><input name="other_note" value="{{ c.other_note or '' }}"></div><div><label>备注</label><input name="notes" value="{{ c.notes or '' }}"></div></div>
 <p><b>预估合计：<span id="total"></span></b> <span class="small mute">保存后以系统计算为准（含满 6 人补差）</span></p>
-<p><button class="btn">保存并计算</button> {% if c.id and not c.locked %}<button class="btn danger" name="delete" value="1" onclick="return confirm('删除这张结算单？')">删除</button>{% endif %}</p>
+<p><button class="btn">保存并计算</button></p>
 </fieldset></form>
 
 {% if c.id and not c.locked %}<form method="post" enctype="multipart/form-data" action="{{ url_for('commission_import_roster', cid=c.id) }}" class="card inline"><input type="hidden" name="_csrf" value="{{ csrf }}">
-<div style="flex:3"><label>从 Student Roster Excel 导入学生（就是你现在用的 Commission Detail 表，按学期名找工作表）</label><input type="file" name="file" accept=".xlsx" required></div>
-<div><label>工作表名（可选）</label><input name="sheet" placeholder="{{ c.term }}"></div><div><button class="btn ghost">导入</button></div></form>{% endif %}
+<div style="flex:3"><label>从 Student Roster Excel 导入学生（就是你现在用的 Commission Detail 表，按学期名找工作表）。导入前会先给你看对比，确认后才写入。</label><input type="file" name="file" accept=".xlsx" required></div>
+<div><label>工作表名（可选）</label><input name="sheet" placeholder="{{ c.term }}"></div><div><button class="btn ghost">读取并核对</button></div></form>{% endif %}
 
 {% if c.lines %}<div class="card"><h2>系统计算明细</h2><table><tr><th>项目</th><th>学生</th><th class="r">已缴学费</th><th class="r">比例</th><th class="r">佣金</th></tr>
 {% for l in c.lines %}<tr><td>{{ l.label }}</td><td>{{ l.student or '' }}</td><td class="r">{{ l.fee|money }}</td><td class="r">{{ ('%g%%'|format(l.rate)) if l.rate is not none else '' }}</td><td class="r">{{ l.amount|money }}</td></tr>{% endfor %}
@@ -75,10 +77,17 @@ const $=id=>document.getElementById(id), T=$('stu'), PRIOR={{ (c.ft1_ay or 0) - 
 function num(v){return Number(String(v||'').replace(/[,$]/g,''))||0}
 function calc(){const o=$('agent').selectedOptions[0]||{dataset:{}};const d=o.dataset;
  const rows=[...T.querySelectorAll('.srow')];const n1=PRIOR+rows.filter(r=>r.querySelector('.pay').value!=='0'&&r.querySelector('[name=s_program]').value==='FT1'&&r.querySelector('[name=s_name]').value.trim()).length;
- const y1=n1>=6?num(d.y16):num(d.y1);const rate={FT1:y1,FT2:num(d.y2),FT3:num(d.y3),PT:15,AP:10};let t=0;
+ const y1=n1>=6?num(d.y16):num(d.y1);const rate={FT1:y1,FT2:num(d.y2),FT3:num(d.y3),PT:15,AP:num(d.ap||10)};let t=0;
  rows.forEach(r=>{if(r.querySelector('.pay').value==='0'){r.querySelector('.amt').textContent='不付';r.style.color='#999';return;}r.style.color='';const ov=r.querySelector('.ov').value;const p=ov!==''?num(ov):rate[r.querySelector('[name=s_program]').value];const a=num(r.querySelector('.tu').value)*p/100;t+=a;r.querySelector('.amt').textContent=a?'$'+a.toLocaleString(undefined,{maximumFractionDigits:2})+' ('+p+'%)':'';});
  t+=num($('other').value);$('total').textContent='$'+t.toLocaleString(undefined,{maximumFractionDigits:2});}
-$('add').onclick=()=>{const r=T.querySelector('.srow:last-child').cloneNode(true);r.querySelectorAll('input').forEach(i=>i.value='');r.querySelector('.pay').value='1';T.querySelector('tbody').appendChild(r);calc();};
+function addRow(){const r=T.querySelector('.srow:last-child').cloneNode(true);r.querySelectorAll('input').forEach(i=>i.value='');r.querySelectorAll('.nolink').forEach(x=>x.remove());r.querySelector('.pay').value='1';r.querySelector('[name=s_origin]').value='International';T.querySelector('tbody').appendChild(r);calc();return r;}
+$('add').onclick=()=>{addRow().querySelector('[name=s_name]').focus()};
+const ROSTER={{ (roster_pick or [])|tojson }};
+if($('pickstu'))$('pickstu').onchange=e=>{const x=ROSTER[e.target.value];if(!x)return;const last=T.querySelector('.srow:last-child');const r=last.querySelector('[name=s_name]').value.trim()?addRow():last;
+ r.querySelector('[name=s_sid]').value=x.id;r.querySelector('[name=s_name]').value=x.name;r.querySelector('[name=s_program]').value=x.program||'FT1';r.querySelector('[name=s_courses]').value=x.courses||'';
+ r.querySelector('[name=s_origin]').value=x.origin==='Local'?'Local':'International';r.querySelector('[name=s_tuition]').value=x.tuition??'';e.target.querySelector('option[value="'+e.target.value+'"]').remove();e.target.value='';calc();};
 T.addEventListener('click',e=>{if(e.target.classList.contains('del')&&T.querySelectorAll('.srow').length>1){e.target.closest('tr').remove();calc();}});
 $('f').addEventListener('input',calc);$('f').addEventListener('change',calc);calc();
-</script>{% endblock %}
+</script>{% if c.id and not c.locked %}<form method="post" class="card" style="text-align:right;background:transparent;border-style:dashed"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="agent_id" value="{{ c.agent_id }}"><input type="hidden" name="term" value="{{ c.term }}">
+<span class="small mute">整张结算单不要了？删除后先放进回收站，30 天内可以恢复。</span> <button class="btn ghost small" name="delete" value="1" onclick="return confirm('删除这张结算单？（会先放进回收站）')" style="color:var(--bad)">删除这张结算单</button></form>{% endif %}
+{% endblock %}

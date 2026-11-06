@@ -1,0 +1,10 @@
+{# 跟进记录：rec = 记录，nkind = agent / student / prospect #}
+<div class="card" id="notes"><h2>跟进记录 <span class="small mute">打过电话、见过面、谈了什么，都记在这里</span></h2>
+<form method="post" action="{{ url_for('notes_post', kind=nkind, rid=rec.id) }}" class="inline" data-draft="note"><input type="hidden" name="_csrf" value="{{ csrf }}">
+<div style="flex:4"><label>记一句</label><input name="text" placeholder="例如：电话沟通，下周发 2027 年招生计划" required></div>
+<div><label>下次跟进日（可选）</label><input type="date" name="next"></div><div><button class="btn ghost">记下</button></div></form>
+{% set log = (rec.log or [])|list %}{% if log %}<table class="small" style="margin-top:10px">{% for e in log|reverse %}{% set i = log|length - loop.index %}<tr>
+<td class="mono mute" style="white-space:nowrap">{{ e.at|replace('T',' ') }}</td><td style="white-space:pre-wrap">{{ e.text }}</td>
+<td style="white-space:nowrap">{% if e.next %}{% if e.done %}<span class="tag">已跟进 {{ e.done }}</span>{% else %}<span class="tag {{ 't-bad' if e.next <= today_iso else 't-warn' }}">下次 {{ e.next }}</span>{% endif %}{% endif %}</td>
+<td style="white-space:nowrap"><form method="post" action="{{ url_for('notes_post', kind=nkind, rid=rec.id) }}" style="display:inline"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="i" value="{{ i }}">
+{% if e.next and not e.done %}<button class="btn ghost small" name="act" value="done">完成</button>{% endif %}<button class="btn ghost small" name="act" value="delete" onclick="return confirm('删除这条记录？')">删除</button></form></td></tr>{% endfor %}</table>{% endif %}</div>

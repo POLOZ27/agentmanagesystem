@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block title %}按在读名册建草稿{% endblock %}{% block body %}
+<h1>按在读学生名册建草稿 · {{ term }}</h1>
+<form class="toolbar autofilter"><label style="margin:0">学期</label><select name="term" style="width:auto">{% for t in terms|reverse %}<option {{ 'selected' if t == term }}>{{ t }}</option>{% endfor %}</select></form>
+<div class="card"><p class="small mute" style="margin-top:0">列出所有「已入学、在读、有代理」而且这个学期结算单里还没有的学生。系统已按合同算好：第几年（全日制第一年 / 第二年 / 第三年）、这是他第几个学期、本学期付不付（合同只付前几个学期的、兼职 / AP 已付过首次的，默认「不付」）。学费先沿用上一期，请核对后再加。毕业、离校的学生在学生页面把「在读状态」改掉，就不会再出现在这里。</p>
+{% if plan %}<form method="post" data-draft="rosterfill"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="term" value="{{ term }}">
+<div class="tablewrap"><table class="small"><tr><th><input type="checkbox" checked style="width:auto" onclick="this.closest('table').querySelectorAll('.pk:not(:disabled)').forEach(i=>i.checked=this.checked)"></th><th>代理</th><th>学生</th><th>入学</th><th>第几学期</th><th>类别</th><th>学费</th><th>本学期</th><th>说明</th></tr>
+{% for x in plan %}<tr><td><input type="checkbox" class="pk" name="pick" value="{{ x.key }}" {{ 'disabled' if x.locked else 'checked' }} style="width:auto"></td>
+<td>{{ x.a.code or '' }} {{ x.a.name }}{% if x.locked %}<div class="tag t-warn">这期结算单已发出，没法加</div>{% elif not x.cur %}<div class="mute">会新建草稿</div>{% endif %}</td>
+<td><a href="{{ url_for('student_edit', sid=x.st.id) }}">{{ x.st.name }}</a></td><td>{{ x.st.intake or '' }}</td><td>第 {{ x.row.term_no }} 个</td>
+<td>{{ PROGRAMS.get(x.row.program, x.row.program) }}</td><td><input name="tu_{{ x.key }}" value="{{ x.row.tuition }}" style="width:96px"></td>
+<td><select name="pay_{{ x.key }}" style="width:auto"><option value="1">付</option><option value="0" {{ 'selected' if x.row.nopay }}>不付</option></select></td><td class="mute">{{ x.row.note }}</td></tr>{% endfor %}</table></div>
+<p><button class="btn">把勾选的加进结算单草稿</button> <a class="btn ghost" href="{{ url_for('commissions', term=term) }}">取消</a> <span class="small mute">只建草稿，不会发出任何邮件</span></p></form>
+{% else %}<p class="mute">这个学期没有要加的在读学生：要么都已经在结算单里了，要么学生名册里没有「已入学、在读」的学生。</p>{% endif %}</div>{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block title %}核对导入{% endblock %}{% block body %}<h1>核对导入 · {{ a.name }} <span class="mute small">{{ c.term }}</span></h1>
+<div class="card"><p>Excel 工作表「{{ sheet }}」里有 <b>{{ rows|length }}</b> 名学生：新增 {{ rows|selectattr('_st','equalto','新增')|list|length }} 名，和结算单里同名的 {{ rows|selectattr('_st','equalto','更新')|list|length }} 名。
+{% if gone %}结算单里原来有、Excel 里没有的 <b>{{ gone|length }}</b> 名：{% for x in gone %}{{ x.name }}{{ '、' if not loop.last }}{% endfor %}。{% endif %}</p>
+<div class="tablewrap"><table class="small"><tr><th></th><th>学生</th><th>类别</th><th>课程</th><th class="r">已缴学费</th></tr>
+{% for x in rows %}<tr><td><span class="tag {{ 't-活跃' if x._st == '新增' else '' }}">{{ x._st }}</span></td><td>{{ x.name }}</td><td>{{ PROGRAMS.get(x.program, x.program) }}</td><td>{{ x.courses or '' }}</td><td class="r">{{ x.tuition|money }}</td></tr>{% endfor %}</table></div>
+<form method="post" action="{{ url_for('commission_import_apply', cid=c.id) }}" style="margin-top:12px"><input type="hidden" name="_csrf" value="{{ csrf }}"><textarea name="data" hidden>{{ data }}</textarea>
+<label class="steps"><input type="radio" name="mode" value="merge" checked> 合并（推荐）：加上新学生，同名的用 Excel 里的数据更新{% if gone %}，结算单里另外的 {{ gone|length }} 名保留{% endif %}</label>
+<label class="steps"><input type="radio" name="mode" value="replace"> 替换：结算单里只留 Excel 里的这 {{ rows|length }} 名{% if gone %}（会去掉 {{ gone|length }} 名）{% endif %}</label>
+<p><button class="btn">确认导入</button> <a class="btn ghost" href="{{ url_for('commission_edit', cid=c.id) }}">取消</a></p></form></div>{% endblock %}

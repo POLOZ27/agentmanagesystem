@@ -130,6 +130,18 @@ def _app_token():
     return j["access_token"]
 
 
+def app_send_plain(sender, to, subject, body):
+    """不经过保险库直接发一封纯文字邮件（应用权限）。只用来在系统锁定时提醒 POLO 登录，信里不含任何代理数据。"""
+    if not app_on() or not sender or not to:
+        return False
+    msg = {"subject": subject, "body": {"contentType": "Text", "content": body},
+           "toRecipients": [{"emailAddress": {"address": to}}]}
+    r = httpx.post(GRAPH + f"/users/{sender}/sendMail", headers={"Authorization": "Bearer " + _app_token()},
+                   json={"message": msg, "saveToSentItems": True}, timeout=30)
+    r.raise_for_status()
+    return True
+
+
 def account_for(cfg, kind=None):
     accts = accounts(cfg)
     want = (cfg.get("mail_route") or {}).get(kind or "")
@@ -231,14 +243,33 @@ def settings(vault):
     return s
 
 
+# 邮件里的占位符：中文和英文两种写法都认（写邮件页、推广模板、开发邮件共用）
+PLACEHOLDERS = [("{联系人}", "{name}", "联系人名字（没有就用机构名）"), ("{代理名称}", "{agency}", "代理 / 机构名称"),
+                ("{代理编号}", "{code}", "代理编号，如 J202103"), ("{资料包链接}", "{kit_link}", "合作伙伴资料包链接"),
+                ("{预约链接}", "{link}", "预约会议链接")]
+
+
 def render(text, agent, kit_link=""):
     import outreach_i18n
+    text = (text or "").replace("{资料包链接}", "{kit_link}").replace("{预约链接}", "{link}")
     text = outreach_i18n.fill_links(text, kit_link)
-    return (text.replace("{代理名称}", agent.get("name", ""))
-                .replace("{代理编号}", agent.get("code") or "")
-                .replace("{联系人}", agent.get("contact") or agent.get("name", ""))
-                .replace("{name}", agent.get("contact") or agent.get("name", ""))
-                .replace("{agency}", agent.get("name", "")))
+    contact = agent.get("contact") or agent.get("name", "")
+    for k, v in (("{代理名称}", agent.get("name", "")), ("{agency}", agent.get("name", "")),
+                 ("{代理编号}", agent.get("code") or ""), ("{code}", agent.get("code") or ""),
+                 ("{联系人}", contact), ("{name}", contact), ("{contact}", contact)):
+        text = text.replace(k, v)
+    return text
+
+
+def leftover(*texts):
+    """替换完以后还剩下的 {…}（写错的占位符、要自己填的 {intake} {deadline}、没设置的链接）。"""
+    import re
+    out = []
+    for t in texts:
+        for m in re.findall(r"\{[^{}\s]{1,24}\}", t or ""):
+            if m not in out:
+                out.append(m)
+    return out
 
 
 class Outbox:
@@ -405,16 +436,47 @@ def recipients(vault, c):
     return agents
 
 
+MISSED_HOURS = 24  # 过了预定时间超过这么久还没发（例如服务器重启后系统一直锁着），不自动补发，等 POLO 决定
+
+
+def advance(c, now):
+    """把下次发送时间推到 now 之后；一次性的推送发完就停用。"""
+    n = c.get("next_at")
+    while n and dt.datetime.fromisoformat(n) <= now:
+        n = next_run(c, dt.datetime.fromisoformat(n))
+    c["next_at"] = n
+    c["active"] = bool(n)
+    c.pop("missed", None)
+    return c
+
+
+def send_campaign(vault, c, now=None):
+    now = now or dt.datetime.now()
+    sent = send_to_agents(vault, recipients(vault, c), c["subject"], c["body"], c["id"], sender=c.get("sender"))
+    c["last_at"] = now.isoformat(timespec="minutes")
+    c["last_count"] = len(sent)
+    advance(c, now)
+    vault.put("campaign", c)
+    return sent
+
+
+def overdue(c, now=None):
+    now = now or dt.datetime.now()
+    return bool(c.get("active") and c.get("next_at")
+                and now - dt.datetime.fromisoformat(c["next_at"]) > dt.timedelta(hours=MISSED_HOURS))
+
+
 def run_due(vault, now=None):
     now = now or dt.datetime.now()
     for c in vault.all("campaign"):
         if c.get("active") and c.get("next_at") and dt.datetime.fromisoformat(c["next_at"]) <= now:
-            sent = send_to_agents(vault, recipients(vault, c), c["subject"], c["body"], c["id"], sender=c.get("sender"))
-            c["last_at"] = now.isoformat(timespec="minutes")
-            c["last_count"] = len(sent)
-            c["next_at"] = next_run(c, dt.datetime.fromisoformat(c["next_at"]))
-            c["active"] = bool(c["next_at"])
-            vault.put("campaign", c)
+            if overdue(c, now):  # 错过太久：标出来，页面上让 POLO 选「现在补发」或「跳过这次」
+                if c.get("missed") != c["next_at"]:
+                    c["missed"] = c["next_at"]
+                    vault.put("campaign", c)
+                    vault.audit("campaign missed (not auto-sent)")
+                continue
+            send_campaign(vault, c, now)
 
 
 def start_scheduler(vault, interval=60):
